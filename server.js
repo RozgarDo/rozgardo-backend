@@ -16,7 +16,7 @@ app.use(express.urlencoded({ limit: '10mb', extended: true }));
 app.use('/api/auth', authRoutes);
 app.use('/api/jobs', jobRoutes);
 app.use('/api/applications', applicationRoutes);
-app.use('/onboarding', onboardingRoutes);
+app.use('/api/onboarding', onboardingRoutes);
 
 // Temporary Diagnostic Route to find allowed status values
 app.get('/api/debug-status', async (req, res) => {
@@ -26,5 +26,5 @@ app.get('/api/debug-status', async (req, res) => {
   res.json({ uniqueStatuses });
 });
 
-const PORT = process.env.PORT || 5000;
+const PORT = process.env.PORT;
 app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
