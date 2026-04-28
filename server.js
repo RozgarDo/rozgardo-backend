@@ -20,10 +20,11 @@ app.use('/api/onboarding', onboardingRoutes);
 
 // Warmup endpoint for Render.com to keep server active
 app.get('/warmup', async (req, res) => {
+  console.log('Warmup hit');
   try {
     const supabase = require('./supabaseClient');
     await supabase.from('users').select('id').limit(1);
-    res.send('warm');
+    res.send('ok');
   } catch (e) {
     res.status(500).send('error');
   }
