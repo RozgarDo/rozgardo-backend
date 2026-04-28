@@ -18,6 +18,17 @@ app.use('/api/jobs', jobRoutes);
 app.use('/api/applications', applicationRoutes);
 app.use('/api/onboarding', onboardingRoutes);
 
+// Warmup endpoint for Render.com to keep server active
+app.get('/warmup', async (req, res) => {
+  try {
+    const supabase = require('./supabaseClient');
+    await supabase.from('users').select('id').limit(1);
+    res.send('warm');
+  } catch (e) {
+    res.status(500).send('error');
+  }
+});
+
 // Temporary Diagnostic Route to find allowed status values
 app.get('/api/debug-status', async (req, res) => {
   const { data, error } = await require('./supabaseClient').from('applications').select('status').limit(10);
