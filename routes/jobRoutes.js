@@ -81,9 +81,13 @@ router.get('/:id', async (req, res) => {
     }
 });
 
-// Post a new job (Defaults to pending status)
+
+
 router.post('/', async (req, res) => {
     const { title, category, salary, location, description, employer_id, job_type } = req.body;
+    if (!title || !employer_id) {
+        return res.status(400).json({ error: 'Title and employer_id are required' });
+    }
     try {
         const { data, error } = await supabase
             .from('jobs')
@@ -93,7 +97,7 @@ router.post('/', async (req, res) => {
                 salary, 
                 location, 
                 description: description || 'No description provided.', 
-                employer_id, 
+                employer_id,
                 job_type: job_type || 'Full-time',
                 status: 'pending',
                 is_active: true
@@ -101,12 +105,43 @@ router.post('/', async (req, res) => {
             .select()
             .single();
 
-        if (error) return res.status(400).json({ error: error.message });
+        if (error) {
+            console.error("Supabase insert error details:", error);  // <-- ADD THIS
+            return res.status(400).json({ error: error.message, details: error.details, code: error.code });
+        }
         res.status(201).json({ message: 'Job posted successfully', job: data });
     } catch (err) {
+        console.error("Unexpected error:", err);
         res.status(500).json({ error: err.message });
     }
 });
+
+// Post a new job (Defaults to pending status)
+// router.post('/', async (req, res) => {
+//     const { title, category, salary, location, description, employer_id, job_type } = req.body;
+//     try {
+//         const { data, error } = await supabase
+//             .from('jobs')
+//             .insert([{ 
+//                 title, 
+//                 category, 
+//                 salary, 
+//                 location, 
+//                 description: description || 'No description provided.', 
+//                 employer_id, 
+//                 job_type: job_type || 'Full-time',
+//                 status: 'pending',
+//                 is_active: true
+//             }])
+//             .select()
+//             .single();
+
+//         if (error) return res.status(400).json({ error: error.message });
+//         res.status(201).json({ message: 'Job posted successfully', job: data });
+//     } catch (err) {
+//         res.status(500).json({ error: err.message });
+//     }
+// });
 
 // Update job status (Admin functionality)
 router.patch('/:id/status', async (req, res) => {

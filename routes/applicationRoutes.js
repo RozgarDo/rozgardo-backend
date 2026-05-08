@@ -5,21 +5,18 @@ const supabase = require('../supabaseClient');
 // Apply for a job
 router.post('/', async (req, res) => {
     let { job_id, employee_id } = req.body;
-    console.log(`Apply request received - Job: ${job_id}, User: ${employee_id}`);
+    console.log(`Apply request received - Job: ${job_id}, Employee: ${employee_id}`);
     
     try {
-        // 0. ID Resolution Safety Net: Ensure employee_id is a valid User UUID
-        const { data: userCheck } = await supabase.from('users').select('id').eq('id', employee_id).maybeSingle();
-        
-        if (!userCheck) {
-            console.log(`ID ${employee_id} not found in 'users', checking 'applicant_profiles'...`);
-            const { data: profileCheck } = await supabase.from('applicant_profiles').select('user_id').eq('id', employee_id).maybeSingle();
-            if (profileCheck) {
-                console.log(`Resolved Profile ID ${employee_id} to User ID ${profileCheck.user_id}`);
-                employee_id = profileCheck.user_id;
-            } else {
-                return res.status(404).json({ error: 'Valid user account not found. Please log out and log back in.' });
-            }
+        // 0. Validate employee exists in the new employees_users table
+        const { data: employee, error: empError } = await supabase
+            .from('employees_users')
+            .select('id, full_name')
+            .eq('id', employee_id)
+            .maybeSingle();
+
+        if (empError || !employee) {
+            return res.status(404).json({ error: 'Valid employee account not found. Please log out and log back in.' });
         }
 
         // 1. Check if job exists and is approved
@@ -70,10 +67,9 @@ router.post('/', async (req, res) => {
     }
 });
 
-// Employee View: Get applications for a specific employee
+// Employee View: Get applications for a specific employee (now using employees_users)
 router.get('/employee/:id', async (req, res) => {
     try {
-        // We try a simple select first, then manually enrich to avoid join failures if FKs are missing
         const { data: apps, error } = await supabase
             .from('applications')
             .select('*')
@@ -98,21 +94,22 @@ router.get('/employee/:id', async (req, res) => {
 
             let employerName = 'Unknown Employer';
             if (job?.employer_id) {
-                const { data: profile } = await supabase
-                    .from('employer_profiles')
+                // First try new employers_users
+                const { data: newEmp } = await supabase
+                    .from('employers_users')
                     .select('company_name')
-                    .eq('user_id', job.employer_id)
+                    .eq('id', job.employer_id)
                     .single();
-                
-                if (profile?.company_name) {
-                    employerName = profile.company_name;
+                if (newEmp?.company_name) {
+                    employerName = newEmp.company_name;
                 } else {
-                    const { data: user } = await supabase
-                        .from('users')
-                        .select('name')
-                        .eq('id', job.employer_id)
+                    // Fallback to legacy
+                    const { data: profile } = await supabase
+                        .from('employer_profiles')
+                        .select('company_name')
+                        .eq('user_id', job.employer_id)
                         .single();
-                    employerName = user?.name || 'Unknown Employer';
+                    employerName = profile?.company_name || 'Unknown Employer';
                 }
             }
 
@@ -131,7 +128,7 @@ router.get('/employee/:id', async (req, res) => {
     }
 });
 
-// Employer View: Get applications for a specific job
+// Employer View: Get applications for a specific job (now supports new employees)
 router.get('/job/:id', async (req, res) => {
     try {
         const { data: apps, error } = await supabase
@@ -142,8 +139,32 @@ router.get('/job/:id', async (req, res) => {
 
         if (error) return res.status(400).json({ error: error.message });
 
-        // Enrich with applicant details from users + applicant_profiles
+        // Enrich with applicant details from employees_users (new) + optionally legacy
         const enriched = await Promise.all(apps.map(async (app) => {
+            // First try the new employees_users table
+            const { data: newEmployee, error: newEmpError } = await supabase
+                .from('employees_users')
+                .select('id, full_name, phone_number, email, current_location, highest_qualification, job_types, preferred_languages')
+                .eq('id', app.employee_id)
+                .single();
+
+            if (!newEmpError && newEmployee) {
+                // Map to the shape expected by frontend (similar to old users + profile)
+                return {
+                    ...app,
+                    users: {
+                        name: newEmployee.full_name,
+                        phone: newEmployee.phone_number,
+                        email: newEmployee.email,
+                        location: newEmployee.current_location,
+                        skills: newEmployee.job_types?.join(',') || '',
+                        experience: newEmployee.highest_qualification,
+                        ...newEmployee
+                    }
+                };
+            }
+
+            // Fallback to legacy users + applicant_profiles (for old data)
             const { data: userData, error: userErr } = await supabase
                 .from('users')
                 .select(`
@@ -155,7 +176,7 @@ router.get('/job/:id', async (req, res) => {
                 .eq('id', app.employee_id)
                 .single();
 
-            if (userErr || !userData) return { ...app, users: { name: 'Unknown' } };
+            if (userErr || !userData) return { ...app, users: { name: 'Unknown Applicant' } };
 
             const profile = userData.applicant_profiles?.[0] || userData.applicant_profiles || {};
             delete userData.applicant_profiles;
@@ -172,7 +193,7 @@ router.get('/job/:id', async (req, res) => {
     }
 });
 
-// Employer Action: Update application status
+// Employer Action: Update application status (unchanged)
 router.patch('/:id/status', async (req, res) => {
     const { status } = req.body;
     try {
