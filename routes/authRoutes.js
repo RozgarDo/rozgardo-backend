@@ -19,6 +19,13 @@ function normalizePhone(phone) {
   return `+91${cleaned}`;
 }
 
+// Helper: Remove sensitive fields from user objects
+function stripPassword(obj) {
+  if (!obj) return obj;
+  const { password, password_hash, ...rest } = obj;
+  return rest;
+}
+
 // ------------------- Existing routes (unchanged, but employee registration is now blocked in /register) -------------------
 
 // Login endpoint supporting both Password and Mock-OTP flows
@@ -68,7 +75,7 @@ router.post('/login', async (req, res) => {
         const flattenedUser = { ...profileData, ...userData, id: userData.id }; 
         console.log(`User logged in: ${flattenedUser.name} (UUID: ${flattenedUser.id})`);
 
-        res.json({ message: 'Login successful', user: flattenedUser });
+        res.json({ message: 'Login successful', user: stripPassword(flattenedUser) });
     } catch (error) {
         res.status(500).json({ error: error.message });
     }
@@ -204,7 +211,7 @@ router.put('/profile/:id', async (req, res) => {
         }
 
         const flattenedUser = { ...updatedUser, ...updatedProfile, id: updatedUser.id };
-        res.json({ message: 'Profile updated', user: flattenedUser });
+        res.json({ message: 'Profile updated', user: stripPassword(flattenedUser) });
     } catch (err) {
         res.status(500).json({ error: err.message });
     }
@@ -215,7 +222,7 @@ router.get('/users', async (req, res) => {
     try {
         const { data, error } = await supabase.from('users').select('*');
         if (error) return res.status(400).json({ error: error.message });
-        res.json(data);
+        res.json(Array.isArray(data) ? data.map(stripPassword) : data);
     } catch (err) {
          res.status(500).json({ error: err.message });
     }
@@ -379,8 +386,7 @@ router.post('/employer-register', async (req, res) => {
       return res.status(500).json({ error: error.message });
     }
 
-    delete data.password_hash;
-    res.status(201).json({ message: 'Registration successful', user: data });
+    res.status(201).json({ message: 'Registration successful', user: stripPassword(data) });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: err.message });
@@ -415,7 +421,7 @@ router.post('/employee-login', async (req, res) => {
       return res.status(401).json({ error: 'Invalid password' });
     }
 
-    const { password_hash, ...safeEmployee } = employee;
+    const safeEmployee = stripPassword(employee);
     const user = {
       ...safeEmployee,
       name: safeEmployee.full_name,
@@ -425,7 +431,6 @@ router.post('/employee-login', async (req, res) => {
     };
     delete user.full_name;
     delete user.phone_number;
-
     res.json({ message: 'Login successful', user });
   } catch (err) {
     console.error(err);
@@ -460,9 +465,7 @@ router.post('/employer-login', async (req, res) => {
       return res.status(401).json({ error: 'Invalid password' });
     }
 
-    const { password_hash, ...safeEmployer } = employer;
-
-    // Map fields to match navbar expectations
+    const safeEmployer = stripPassword(employer);
     const user = {
       ...safeEmployer,
       name: safeEmployer.company_name,
@@ -470,7 +473,6 @@ router.post('/employer-login', async (req, res) => {
       role: 'employer',
       id: safeEmployer.id,
     };
-
     res.json({ message: 'Login successful', user });
   } catch (err) {
     console.error(err);
@@ -549,7 +551,7 @@ router.post('/employee/verify-otp', async (req, res) => {
       return res.status(404).json({ error: 'Employee profile not found' });
     }
 
-    const { password_hash, ...safeEmployee } = employee;
+    const safeEmployee = stripPassword(employee);
     const user = {
       ...safeEmployee,
       name: safeEmployee.full_name,
@@ -559,7 +561,6 @@ router.post('/employee/verify-otp', async (req, res) => {
     };
     delete user.full_name;
     delete user.phone_number;
-
     res.json({ user, message: 'Login successful' });
   } catch (err) {
     console.error(err);
