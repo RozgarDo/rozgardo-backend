@@ -1,7 +1,23 @@
 const express = require('express');
 const router = express.Router();
 const bcrypt = require('bcrypt');
-const supabase = require('../supabaseClient');
+const { createClient } = require('@supabase/supabase-js');
+const supabase = require('../supabaseClient'); // regular (anon) client
+
+// Create admin client using service role key (for auth.admin operations and to bypass RLS)
+const supabaseAdmin = createClient(
+  process.env.SUPABASE_URL,
+  process.env.SUPABASE_SERVICE_ROLE_KEY,
+  { auth: { autoRefreshToken: false, persistSession: false } }
+);
+
+// Helper: Normalize Indian phone numbers to E.164 format (+91xxxxxxxxxx)
+function normalizePhone(phone) {
+  if (!phone) return phone;
+  let cleaned = phone.trim().replace(/^\+?91/, ''); // remove any existing +91 or 91
+  cleaned = cleaned.replace(/^0+/, '');            // remove leading zeros
+  return `+91${cleaned}`;
+}
 
 // ------------------- Existing routes (unchanged, but employee registration is now blocked in /register) -------------------
 
@@ -70,46 +86,46 @@ router.post('/send-otp', async (req, res) => {
     }
 });
 
-// Register: creates a new user and matching profile (NOW ONLY FOR EMPLOYERS)
-// If role === 'employee', we block and suggest the new endpoint.
-router.post('/register', async (req, res) => {
-    const { phone, email, password, role, name, skills, location, experience, salary } = req.body;
+// // Register: creates a new user and matching profile (NOW ONLY FOR EMPLOYERS)
+// // If role === 'employee', we block and suggest the new endpoint.
+// router.post('/register', async (req, res) => {
+//     const { phone, email, password, role, name, skills, location, experience, salary } = req.body;
     
-    // Block employee registrations - they must use /employee-register
-    if (role === 'employee') {
-        return res.status(400).json({ error: 'Employee registrations must use /api/auth/employee-register' });
-    }
+//     // Block employee registrations - they must use /employee-register
+//     if (role === 'employee') {
+//         return res.status(400).json({ error: 'Employee registrations must use /api/auth/employee-register' });
+//     }
     
-    try {
-        // 1. Insert into users table
-        const userPayload = { phone, role, name };
-        if (email) userPayload.email = email;
-        if (password) userPayload.password = password;
+//     try {
+//         // 1. Insert into users table
+//         const userPayload = { phone, role, name };
+//         if (email) userPayload.email = email;
+//         if (password) userPayload.password = password;
 
-        const { data: newUser, error: userError } = await supabase
-            .from('users')
-            .insert([userPayload])
-            .select()
-            .single();
+//         const { data: newUser, error: userError } = await supabase
+//             .from('users')
+//             .insert([userPayload])
+//             .select()
+//             .single();
 
-        if (userError) return res.status(400).json({ error: userError.message });
+//         if (userError) return res.status(400).json({ error: userError.message });
 
-        // 2. Insert into appropriate profile table (only employer now)
-        let profileData = {};
-        if (role === 'employer') {
-            const { data: newProfile, error: profileError } = await supabase
-                .from('employer_profiles')
-                .insert([{ user_id: newUser.id, location, company_name: name }])
-                .select().single();
-            if (!profileError) profileData = newProfile;
-        }
+//         // 2. Insert into appropriate profile table (only employer now)
+//         let profileData = {};
+//         if (role === 'employer') {
+//             const { data: newProfile, error: profileError } = await supabase
+//                 .from('employer_profiles')
+//                 .insert([{ user_id: newUser.id, location, company_name: name }])
+//                 .select().single();
+//             if (!profileError) profileData = newProfile;
+//         }
 
-        const flattenedUser = { ...newUser, ...profileData, id: newUser.id };
-        res.status(201).json({ message: 'User created successfully', user: flattenedUser });
-    } catch (err) {
-        res.status(500).json({ error: err.message });
-    }
-});
+//         const flattenedUser = { ...newUser, ...profileData, id: newUser.id };
+//         res.status(201).json({ message: 'User created successfully', user: flattenedUser });
+//     } catch (err) {
+//         res.status(500).json({ error: err.message });
+//     }
+// });
 
 // Update profile details - Splits updates between tables
 router.put('/profile/:id', async (req, res) => {
@@ -205,7 +221,7 @@ router.get('/users', async (req, res) => {
     }
 });
 
-// ------------------- NEW: Employee Registration (with bcrypt) -------------------
+// ------------------- NEW: Employee Registration (with bcrypt + Supabase Auth, using supabaseAdmin to bypass RLS) -------------------
 router.post('/employee-register', async (req, res) => {
     const {
         fullName,
@@ -223,12 +239,19 @@ router.post('/employee-register', async (req, res) => {
         return res.status(400).json({ error: 'Missing required fields: fullName, phoneNumber, password' });
     }
 
+    // Format phone number to E.164 (assume India +91)
+    let formattedPhone = phoneNumber.trim();
+    if (!formattedPhone.startsWith('+')) {
+        formattedPhone = formattedPhone.replace(/^0+/, '');
+        formattedPhone = `+91${formattedPhone}`;
+    }
+
     try {
-        // Check if phone number already exists
-        const { data: existingUser, error: checkError } = await supabase
+        // 1. Check if phone number already exists in employees_users (use admin client to bypass RLS)
+        const { data: existingUser, error: checkError } = await supabaseAdmin
             .from('employees_users')
             .select('phone_number')
-            .eq('phone_number', phoneNumber)
+            .eq('phone_number', formattedPhone)
             .maybeSingle();
 
         if (checkError && checkError.code !== 'PGRST116') {
@@ -240,9 +263,9 @@ router.post('/employee-register', async (req, res) => {
             return res.status(409).json({ error: 'Phone number already registered' });
         }
 
-        // If email provided, check uniqueness
+        // If email provided, check uniqueness (use admin client)
         if (email) {
-            const { data: existingEmail, error: emailCheckError } = await supabase
+            const { data: existingEmail, error: emailCheckError } = await supabaseAdmin
                 .from('employees_users')
                 .select('email')
                 .eq('email', email)
@@ -253,14 +276,35 @@ router.post('/employee-register', async (req, res) => {
             }
         }
 
-        // Hash password
+        // 2. Create user in Supabase Auth (requires service_role key)
+        const crypto = require('crypto');
+        const randomPassword = crypto.randomBytes(16).toString('hex'); // won't be used for login
+
+        const { data: authUser, error: authError } = await supabaseAdmin.auth.admin.createUser({
+            phone: formattedPhone,
+            password: randomPassword,
+            email: email || undefined,
+            email_confirm: true,
+            phone_confirm: true,
+        });
+
+        if (authError) {
+            console.error('Supabase Auth creation error:', authError);
+            if (authError.message.includes('already been registered')) {
+                return res.status(409).json({ error: 'Phone number already registered in Auth system.' });
+            }
+            return res.status(500).json({ error: `Auth creation failed: ${authError.message}` });
+        }
+
+        // 3. Hash the provided password for internal login
         const saltRounds = 10;
         const passwordHash = await bcrypt.hash(password, saltRounds);
 
-        // Prepare insert data - must match exact column names in Supabase table
+        // 4. Insert into employees_users using supabaseAdmin to bypass RLS
         const insertData = {
+            id: authUser.user.id,
             full_name: fullName,
-            phone_number: phoneNumber,
+            phone_number: formattedPhone,
             email: email || null,
             current_location: currentLocation || null,
             highest_qualification: highestQualification || null,
@@ -271,8 +315,7 @@ router.post('/employee-register', async (req, res) => {
 
         console.log('Inserting employee:', { ...insertData, password_hash: '[HIDDEN]' });
 
-        // Insert into employees_users
-        const { data: newEmployee, error: insertError } = await supabase
+        const { data: newEmployee, error: insertError } = await supabaseAdmin
             .from('employees_users')
             .insert([insertData])
             .select()
@@ -280,7 +323,8 @@ router.post('/employee-register', async (req, res) => {
 
         if (insertError) {
             console.error('Supabase insert error:', insertError);
-            // Return detailed error for debugging (remove in production)
+            // Rollback: delete the Auth user if DB insert fails
+            await supabaseAdmin.auth.admin.deleteUser(authUser.user.id);
             return res.status(500).json({ 
                 error: `Database insert failed: ${insertError.message}`,
                 details: insertError.details,
@@ -344,17 +388,18 @@ router.post('/employer-register', async (req, res) => {
 });
 
 
+// ------------------- FIXED: Employee Password Login (with phone normalization) -------------------
 router.post('/employee-login', async (req, res) => {
-  const { phone, password } = req.body;
+  let { phone, password } = req.body;
 
   if (!phone || !password) {
     return res.status(400).json({ error: 'Phone number and password are required' });
   }
 
-  try {
-    const bcrypt = require('bcrypt');
-    const supabase = require('../supabaseClient');
+  // Normalize phone number to stored format
+  phone = normalizePhone(phone);
 
+  try {
     const { data: employee, error } = await supabase
       .from('employees_users')
       .select('*')
@@ -371,8 +416,6 @@ router.post('/employee-login', async (req, res) => {
     }
 
     const { password_hash, ...safeEmployee } = employee;
-
-    // Map fields to what navbar expects
     const user = {
       ...safeEmployee,
       name: safeEmployee.full_name,
@@ -435,5 +478,93 @@ router.post('/employer-login', async (req, res) => {
   }
 });
 
+// ------------------- FIXED: OTP Routes (with phone normalization) -------------------
+// Send OTP to employee’s phone
+router.post('/employee/send-otp', async (req, res) => {
+  let { phone } = req.body;
+  if (!phone) {
+    return res.status(400).json({ error: 'Phone number is required' });
+  }
+
+  phone = normalizePhone(phone);
+
+  try {
+    // Check if employee exists in employees_users
+    const { data: employee, error: findError } = await supabase
+      .from('employees_users')
+      .select('id')
+      .eq('phone_number', phone)
+      .single();
+
+    if (findError || !employee) {
+      return res.status(404).json({ error: 'Employee not found. Please register first.' });
+    }
+
+    // Send OTP via Supabase Auth (Twilio)
+    const { error: otpError } = await supabase.auth.signInWithOtp({
+      phone,
+    });
+
+    if (otpError) {
+      console.error('Supabase OTP error:', otpError);
+      return res.status(500).json({ error: 'Failed to send OTP. Please try again later.' });
+    }
+
+    res.json({ message: 'OTP sent successfully to your mobile number.' });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Verify OTP and log the employee in
+router.post('/employee/verify-otp', async (req, res) => {
+  let { phone, otp } = req.body;
+  if (!phone || !otp) {
+    return res.status(400).json({ error: 'Phone and OTP are required' });
+  }
+
+  phone = normalizePhone(phone);
+
+  try {
+    // Verify OTP with Supabase Auth
+    const { data: authData, error: verifyError } = await supabase.auth.verifyOtp({
+      phone,
+      token: otp,
+      type: 'sms',
+    });
+
+    if (verifyError) {
+      return res.status(401).json({ error: 'Invalid or expired OTP' });
+    }
+
+    // Fetch employee details from employees_users
+    const { data: employee, error: userError } = await supabase
+      .from('employees_users')
+      .select('*')
+      .eq('phone_number', phone)
+      .single();
+
+    if (userError || !employee) {
+      return res.status(404).json({ error: 'Employee profile not found' });
+    }
+
+    const { password_hash, ...safeEmployee } = employee;
+    const user = {
+      ...safeEmployee,
+      name: safeEmployee.full_name,
+      phone: safeEmployee.phone_number,
+      role: 'employee',
+      id: safeEmployee.id,
+    };
+    delete user.full_name;
+    delete user.phone_number;
+
+    res.json({ user, message: 'Login successful' });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
 
 module.exports = router;
