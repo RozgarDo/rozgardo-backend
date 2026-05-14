@@ -3,22 +3,60 @@ const router = express.Router();
 const supabase = require('../supabaseClient');
 
 // Helper: enrich jobs with employer name from employer_profiles table
+// async function enrichJobsWithEmployerName(jobs) {
+//     const employerIds = [...new Set(jobs.map(j => j.employer_id).filter(Boolean))];
+//     if (employerIds.length === 0) return jobs.map(j => ({ ...j, employer_name: 'Unknown' }));
+
+//     const { data: profiles } = await supabase
+//         .from('employer_profiles')
+//         .select('user_id, company_name')
+//         .in('user_id', employerIds);
+
+//     const employerMap = {};
+//     (profiles || []).forEach(p => { employerMap[p.user_id] = p.company_name; });
+
+//     // Fallback to fetch from users table if profile not properly linked
+//     const missingIds = employerIds.filter(id => !employerMap[id]);
+//     if (missingIds.length > 0) {
+//         const { data: fallbackUsers } = await supabase.from('users').select('id, name').in('id', missingIds);
+//         (fallbackUsers || []).forEach(u => { employerMap[u.id] = u.name; });
+//     }
+
+//     return jobs.map(job => ({
+//         ...job,
+//         employer_name: employerMap[job.employer_id] || 'Unknown Employer'
+//     }));
+// }
+
+
+// Helper: enrich jobs with employer name from employers_users or fallback
 async function enrichJobsWithEmployerName(jobs) {
     const employerIds = [...new Set(jobs.map(j => j.employer_id).filter(Boolean))];
     if (employerIds.length === 0) return jobs.map(j => ({ ...j, employer_name: 'Unknown' }));
 
-    const { data: profiles } = await supabase
-        .from('employer_profiles')
-        .select('user_id, company_name')
-        .in('user_id', employerIds);
+    // 1. Try new employers_users table
+    const { data: newEmployers } = await supabase
+        .from('employers_users')
+        .select('id, company_name')
+        .in('id', employerIds);
 
     const employerMap = {};
-    (profiles || []).forEach(p => { employerMap[p.user_id] = p.company_name; });
+    (newEmployers || []).forEach(e => { employerMap[e.id] = e.company_name; });
 
-    // Fallback to fetch from users table if profile not properly linked
-    const missingIds = employerIds.filter(id => !employerMap[id]);
-    if (missingIds.length > 0) {
-        const { data: fallbackUsers } = await supabase.from('users').select('id, name').in('id', missingIds);
+    // 2. Fallback to old employer_profiles for remaining IDs
+    const remainingIds = employerIds.filter(id => !employerMap[id]);
+    if (remainingIds.length > 0) {
+        const { data: profiles } = await supabase
+            .from('employer_profiles')
+            .select('user_id, company_name')
+            .in('user_id', remainingIds);
+        (profiles || []).forEach(p => { employerMap[p.user_id] = p.company_name; });
+    }
+
+    // 3. Final fallback to legacy users table
+    const stillMissing = employerIds.filter(id => !employerMap[id]);
+    if (stillMissing.length > 0) {
+        const { data: fallbackUsers } = await supabase.from('users').select('id, name').in('id', stillMissing);
         (fallbackUsers || []).forEach(u => { employerMap[u.id] = u.name; });
     }
 
@@ -27,6 +65,7 @@ async function enrichJobsWithEmployerName(jobs) {
         employer_name: employerMap[job.employer_id] || 'Unknown Employer'
     }));
 }
+
 
 // Get jobs (supports query params: status, employer_id, is_active, category, location, limit)
 router.get('/', async (req, res) => {
