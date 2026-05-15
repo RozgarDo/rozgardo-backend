@@ -516,4 +516,120 @@ router.post('/employer/verify-otp', async (req, res) => {
   }
 });
 
+router.post('/admin/login', async (req, res) => {
+  const { loginId, password } = req.body;
+
+  if (!loginId || !password) {
+    return res.status(400).json({ error: 'Login ID and password are required' });
+  }
+
+  try {
+    const { data: admin, error } = await supabaseAdmin
+      .from('admin_users')
+      .select('*')
+      .eq('login_id', loginId)   // matches either phone or email stored in this column
+      .single();
+
+    if (error || !admin) {
+      return res.status(404).json({ error: 'Admin not found' });
+    }
+
+    const isValid = await bcrypt.compare(password, admin.password_hash);
+    if (!isValid) {
+      return res.status(401).json({ error: 'Invalid password' });
+    }
+
+    const { password_hash, ...safeAdmin } = admin;
+    const user = {
+      ...safeAdmin,
+      id: safeAdmin.id,
+      name: safeAdmin.name || 'Admin',
+      role: 'admin',
+    };
+
+    res.json({ message: 'Login successful', user });
+  } catch (err) {
+    console.error('Admin login error:', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+
+
+
+// ------------------- GET EMPLOYEES (from employees_users) -------------------
+router.get('/employees', async (req, res) => {
+  try {
+    const { data, error } = await supabaseAdmin
+      .from('employees_users')
+      .select('*')
+      .order('created_at', { ascending: false });
+
+    if (error) return res.status(400).json({ error: error.message });
+    // Remove password_hash
+    const safeData = data.map(emp => {
+      const { password_hash, ...rest } = emp;
+      return {
+        ...rest,
+        id: emp.id,
+        name: emp.full_name,
+        phone: emp.phone_number,
+        role: 'employee'
+      };
+    });
+    res.json(safeData);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ------------------- GET EMPLOYERS (from employers_users) -------------------
+router.get('/employers', async (req, res) => {
+  try {
+    const { data, error } = await supabaseAdmin
+      .from('employers_users')
+      .select('*')
+      .order('created_at', { ascending: false });
+
+    if (error) return res.status(400).json({ error: error.message });
+    const safeData = data.map(emp => {
+      const { password_hash, ...rest } = emp;
+      return {
+        ...rest,
+        id: emp.id,
+        name: emp.company_name,
+        phone: emp.contact_number,
+        role: 'employer'
+      };
+    });
+    res.json(safeData);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ------------------- GET ADMINS (from admin_users) -------------------
+// router.get('/admins', async (req, res) => {
+//   try {
+//     const { data, error } = await supabaseAdmin
+//       .from('admin_users')
+//       .select('*')
+//       .order('created_at', { ascending: false });
+
+//     if (error) return res.status(400).json({ error: error.message });
+//     const safeData = data.map(admin => {
+//       const { password_hash, ...rest } = admin;
+//       return {
+//         ...rest,
+//         role: 'admin'
+//       };
+//     });
+//     res.json(safeData);
+//   } catch (err) {
+//     res.status(500).json({ error: err.message });
+//   }
+// });
+
+
+
 module.exports = router;
