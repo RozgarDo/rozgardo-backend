@@ -2,13 +2,15 @@ const express = require('express');
 const router = express.Router();
 const supabase = require('../supabaseClient');
 
+// Allowed statuses (must match database constraint)
+const ALLOWED_STATUSES = ['applied', 'shortlisted', 'interview', 'selected', 'rejected'];
+
 // Apply for a job
 router.post('/', async (req, res) => {
     let { job_id, employee_id } = req.body;
     console.log(`Apply request received - Job: ${job_id}, Employee: ${employee_id}`);
     
     try {
-        // 0. Validate employee exists in the new employees_users table
         const { data: employee, error: empError } = await supabase
             .from('employees_users')
             .select('id, full_name')
@@ -19,7 +21,6 @@ router.post('/', async (req, res) => {
             return res.status(404).json({ error: 'Valid employee account not found. Please log out and log back in.' });
         }
 
-        // 1. Check if job exists and is approved
         const { data: job, error: jobErr } = await supabase
             .from('jobs')
             .select('status, is_active')
@@ -31,7 +32,6 @@ router.post('/', async (req, res) => {
             return res.status(400).json({ error: 'This job is no longer accepting applications.' });
         }
 
-        // 2. Check if already applied
         const { data: existing } = await supabase
             .from('applications')
             .select('id')
@@ -43,7 +43,6 @@ router.post('/', async (req, res) => {
             return res.status(400).json({ error: 'You have already applied for this job.' });
         }
 
-        // 3. Insert application
         const { data, error } = await supabase
             .from('applications')
             .insert([{ 
@@ -67,7 +66,7 @@ router.post('/', async (req, res) => {
     }
 });
 
-// Employee View: Get applications for a specific employee (now using employees_users)
+// Employee View: Get applications for a specific employee
 router.get('/employee/:id', async (req, res) => {
     try {
         const { data: apps, error } = await supabase
@@ -76,15 +75,9 @@ router.get('/employee/:id', async (req, res) => {
             .eq('employee_id', req.params.id)
             .order('applied_at', { ascending: false });
 
-        console.log(`Fetching apps for employee_id: ${req.params.id}. Found: ${apps?.length || 0}`);
-
-        if (error) {
-            console.error('Supabase application fetch error:', error);
-            return res.status(400).json({ error: error.message });
-        }
+        if (error) return res.status(400).json({ error: error.message });
         if (!apps || apps.length === 0) return res.json([]);
 
-        // Manually fetch job and employer details for each application
         const enriched = await Promise.all(apps.map(async (app) => {
             const { data: job } = await supabase
                 .from('jobs')
@@ -94,7 +87,6 @@ router.get('/employee/:id', async (req, res) => {
 
             let employerName = 'Unknown Employer';
             if (job?.employer_id) {
-                // First try new employers_users
                 const { data: newEmp } = await supabase
                     .from('employers_users')
                     .select('company_name')
@@ -103,7 +95,6 @@ router.get('/employee/:id', async (req, res) => {
                 if (newEmp?.company_name) {
                     employerName = newEmp.company_name;
                 } else {
-                    // Fallback to legacy
                     const { data: profile } = await supabase
                         .from('employer_profiles')
                         .select('company_name')
@@ -128,7 +119,7 @@ router.get('/employee/:id', async (req, res) => {
     }
 });
 
-// Employer View: Get applications for a specific job (now supports new employees)
+// Employer View: Get applications for a specific job
 router.get('/job/:id', async (req, res) => {
     try {
         const { data: apps, error } = await supabase
@@ -139,9 +130,7 @@ router.get('/job/:id', async (req, res) => {
 
         if (error) return res.status(400).json({ error: error.message });
 
-        // Enrich with applicant details from employees_users (new) + optionally legacy
         const enriched = await Promise.all(apps.map(async (app) => {
-            // First try the new employees_users table
             const { data: newEmployee, error: newEmpError } = await supabase
                 .from('employees_users')
                 .select('id, full_name, phone_number, email, current_location, highest_qualification, job_types, preferred_languages')
@@ -149,7 +138,6 @@ router.get('/job/:id', async (req, res) => {
                 .single();
 
             if (!newEmpError && newEmployee) {
-                // Map to the shape expected by frontend (similar to old users + profile)
                 return {
                     ...app,
                     users: {
@@ -164,7 +152,6 @@ router.get('/job/:id', async (req, res) => {
                 };
             }
 
-            // Fallback to legacy users + applicant_profiles (for old data)
             const { data: userData, error: userErr } = await supabase
                 .from('users')
                 .select(`
@@ -193,18 +180,31 @@ router.get('/job/:id', async (req, res) => {
     }
 });
 
-// Employer Action: Update application status (unchanged)
+// Employer Action: Update application status and interview_date
 router.patch('/:id/status', async (req, res) => {
-    const { status } = req.body;
+    const { status, interview_date } = req.body;
+    
+    if (status && !ALLOWED_STATUSES.includes(status)) {
+        return res.status(400).json({ error: `Invalid status. Allowed: ${ALLOWED_STATUSES.join(', ')}` });
+    }
+
     try {
+        const updateData = { status };
+        if (interview_date !== undefined) {
+            updateData.interview_date = interview_date || null;
+        }
+
         const { data, error } = await supabase
             .from('applications')
-            .update({ status })
+            .update(updateData)
             .eq('id', req.params.id)
             .select()
             .single();
             
-        if (error) return res.status(400).json({ error: error.message });
+        if (error) {
+            console.error('Update error:', error);
+            return res.status(400).json({ error: error.message });
+        }
         res.json({ message: `Application ${status}`, application: data });
     } catch (err) {
         res.status(500).json({ error: err.message });

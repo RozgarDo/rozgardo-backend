@@ -89,45 +89,58 @@ router.get('/', async (req, res) => {
     }
 });
 
-// Get single job details (with employer name)
-router.get('/:id', async (req, res) => {
-    try {
-        const { data, error } = await supabase
-            .from('jobs')
-            .select('*')
-            .eq('id', req.params.id)
-            .single();
-        if (error) return res.status(400).json({ error: error.message });
+// // Get single job details (with employer name)
+// router.get('/:id', async (req, res) => {
+//     try {
+//         const { data, error } = await supabase
+//             .from('jobs')
+//             .select('*')
+//             .eq('id', req.params.id)
+//             .single();
+//         if (error) return res.status(400).json({ error: error.message });
         
-        // Get employer name
-        if (data.employer_id) {
-            const { data: profile } = await supabase
-                .from('employer_profiles')
-                .select('company_name')
-                .eq('user_id', data.employer_id)
-                .single();
-            if (profile?.company_name) {
-                data.employer_name = profile.company_name;
-            } else {
-                const { data: user } = await supabase.from('users').select('name').eq('id', data.employer_id).single();
-                data.employer_name = user?.name || 'Unknown Employer';
-            }
-        }
+//         // Get employer name
+//         if (data.employer_id) {
+//             const { data: profile } = await supabase
+//                 .from('employer_profiles')
+//                 .select('company_name')
+//                 .eq('user_id', data.employer_id)
+//                 .single();
+//             if (profile?.company_name) {
+//                 data.employer_name = profile.company_name;
+//             } else {
+//                 const { data: user } = await supabase.from('users').select('name').eq('id', data.employer_id).single();
+//                 data.employer_name = user?.name || 'Unknown Employer';
+//             }
+//         }
         
-        res.json(data);
-    } catch (err) {
-        res.status(500).json({ error: err.message });
-    }
-});
+//         res.json(data);
+//     } catch (err) {
+//         res.status(500).json({ error: err.message });
+//     }
+// });
 
 
 
+// MODIFIED POST ROUTE: added required_experience, education, technical_skills, and vacancies
 router.post('/', async (req, res) => {
-    const { title, category, salary, location, description, employer_id, job_type } = req.body;
+    // Destructure existing + new fields
+    const { 
+        title, category, salary, location, description, employer_id, job_type,
+        required_experience, education, technical_skills, vacancies
+    } = req.body;
+    
     if (!title || !employer_id) {
         return res.status(400).json({ error: 'Title and employer_id are required' });
     }
     try {
+        // Properly handle vacancies: convert empty string, null, undefined, or NaN to 1
+        let vacanciesValue = 1;
+        if (vacancies !== undefined && vacancies !== null && vacancies !== '') {
+            const parsed = parseInt(vacancies);
+            vacanciesValue = isNaN(parsed) ? 1 : parsed;
+        }
+
         const { data, error } = await supabase
             .from('jobs')
             .insert([{ 
@@ -137,15 +150,19 @@ router.post('/', async (req, res) => {
                 location, 
                 description: description || 'No description provided.', 
                 employer_id,
-                job_type: job_type || 'Full-time',
+                job_type: job_type || 'Full-time',   // <-- job_type is accepted
                 status: 'pending',
-                is_active: true
+                is_active: true,
+                required_experience: required_experience || null,
+                education: education || null,
+                technical_skills: technical_skills || null,
+                vacancies: vacanciesValue
             }])
             .select()
             .single();
 
         if (error) {
-            console.error("Supabase insert error details:", error);  // <-- ADD THIS
+            console.error("Supabase insert error details:", error);
             return res.status(400).json({ error: error.message, details: error.details, code: error.code });
         }
         res.status(201).json({ message: 'Job posted successfully', job: data });
@@ -199,6 +216,56 @@ router.patch('/:id/status', async (req, res) => {
             
         if (error) return res.status(400).json({ error: error.message });
         res.json({ message: `Job updated`, job: data });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// Get single job details (with employer name from all possible tables)
+router.get('/:id', async (req, res) => {
+    try {
+        const { data, error } = await supabase
+            .from('jobs')
+            .select('*')
+            .eq('id', req.params.id)
+            .single();
+        if (error) return res.status(400).json({ error: error.message });
+        
+        // Get employer name - try in order: employers_users -> employer_profiles -> users
+        if (data.employer_id) {
+            let employerName = null;
+            
+            // 1. Try new employers_users table (used by your auth)
+            const { data: employerFromNew } = await supabase
+                .from('employers_users')
+                .select('company_name')
+                .eq('id', data.employer_id)
+                .single();
+            if (employerFromNew?.company_name) {
+                employerName = employerFromNew.company_name;
+            } else {
+                // 2. Fallback to old employer_profiles
+                const { data: profile } = await supabase
+                    .from('employer_profiles')
+                    .select('company_name')
+                    .eq('user_id', data.employer_id)
+                    .single();
+                if (profile?.company_name) {
+                    employerName = profile.company_name;
+                } else {
+                    // 3. Final fallback to legacy users table
+                    const { data: user } = await supabase
+                        .from('users')
+                        .select('name')
+                        .eq('id', data.employer_id)
+                        .single();
+                    employerName = user?.name || 'Unknown Employer';
+                }
+            }
+            data.employer_name = employerName;
+        }
+        
+        res.json(data);
     } catch (err) {
         res.status(500).json({ error: err.message });
     }
