@@ -785,6 +785,212 @@ router.post('/send-otp', async (req, res) => {
     }
 });
 
+
+// ------------------- CHANGE PASSWORD (employee) -------------------
+router.put('/change-password', async (req, res) => {
+  const { userId, currentPassword, newPassword } = req.body;
+  if (!userId || !currentPassword || !newPassword) {
+    return res.status(400).json({ error: 'Missing required fields' });
+  }
+  if (newPassword.length < 6) {
+    return res.status(400).json({ error: 'New password must be at least 6 characters' });
+  }
+
+  try {
+    // 1. Fetch the employee from the database
+    const { data: employee, error: fetchError } = await supabaseAdmin
+      .from('employees_users')
+      .select('password_hash')
+      .eq('id', userId)
+      .single();
+
+    if (fetchError || !employee) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    // 2. Verify current password
+    const isValid = await bcrypt.compare(currentPassword, employee.password_hash);
+    if (!isValid) {
+      return res.status(401).json({ error: 'Current password is incorrect' });
+    }
+
+    // 3. Hash the new password
+    const saltRounds = 10;
+    const newHashedPassword = await bcrypt.hash(newPassword, saltRounds);
+
+    // 4. Update the database
+    const { error: updateError } = await supabaseAdmin
+      .from('employees_users')
+      .update({ password_hash: newHashedPassword })
+      .eq('id', userId);
+
+    if (updateError) {
+      console.error('Update error:', updateError);
+      return res.status(500).json({ error: 'Failed to update password' });
+    }
+
+    res.json({ message: 'Password updated successfully' });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+
+
+// ------------------- CHANGE PASSWORD (employer) -------------------
+router.put('/employer/change-password', async (req, res) => {
+  const { userId, currentPassword, newPassword } = req.body;
+  if (!userId || !currentPassword || !newPassword) {
+    return res.status(400).json({ error: 'Missing required fields' });
+  }
+  if (newPassword.length < 6) {
+    return res.status(400).json({ error: 'New password must be at least 6 characters' });
+  }
+
+  try {
+    // 1. Fetch the employer from the database
+    const { data: employer, error: fetchError } = await supabaseAdmin
+      .from('employers_users')
+      .select('password_hash')
+      .eq('id', userId)
+      .single();
+
+    if (fetchError || !employer) {
+      return res.status(404).json({ error: 'Employer not found' });
+    }
+
+    // 2. Verify current password
+    const isValid = await bcrypt.compare(currentPassword, employer.password_hash);
+    if (!isValid) {
+      return res.status(401).json({ error: 'Current password is incorrect' });
+    }
+
+    // 3. Hash the new password
+    const saltRounds = 10;
+    const newHashedPassword = await bcrypt.hash(newPassword, saltRounds);
+
+    // 4. Update the database
+    const { error: updateError } = await supabaseAdmin
+      .from('employers_users')
+      .update({ password_hash: newHashedPassword })
+      .eq('id', userId);
+
+    if (updateError) {
+      console.error('Update error:', updateError);
+      return res.status(500).json({ error: 'Failed to update password' });
+    }
+
+    res.json({ message: 'Password updated successfully' });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+
+
+
+// ------------------- EMPLOYER RESET PASSWORD (after OTP verification) -------------------
+router.post('/employer/reset-password', async (req, res) => {
+  let { phone, newPassword } = req.body;
+  if (!phone || !newPassword) {
+    return res.status(400).json({ error: 'Phone and new password are required' });
+  }
+  if (newPassword.length < 6) {
+    return res.status(400).json({ error: 'New password must be at least 6 characters' });
+  }
+
+  // Normalize phone number to match database format
+  phone = normalizePhone(phone);
+  console.log('Reset password for normalized phone:', phone);
+
+  try {
+    // Find employer by normalized phone number
+    const { data: employer, error: findError } = await supabaseAdmin
+      .from('employers_users')
+      .select('id')
+      .eq('contact_number', phone)
+      .single();
+
+    if (findError || !employer) {
+      console.error('Employer not found for phone:', phone, findError);
+      return res.status(404).json({ error: 'Employer not found' });
+    }
+
+    // Hash new password
+    const saltRounds = 10;
+    const hashedPassword = await bcrypt.hash(newPassword, saltRounds);
+
+    // Update password in database
+    const { error: updateError } = await supabaseAdmin
+      .from('employers_users')
+      .update({ password_hash: hashedPassword })
+      .eq('id', employer.id);
+
+    if (updateError) {
+      console.error('Reset password update error:', updateError);
+      return res.status(500).json({ error: 'Failed to reset password' });
+    }
+
+    res.json({ message: 'Password reset successfully' });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+
+
+// ------------------- EMPLOYEE RESET PASSWORD (after OTP verification) -------------------
+router.post('/employee/reset-password', async (req, res) => {
+  let { phone, newPassword } = req.body;
+  if (!phone || !newPassword) {
+    return res.status(400).json({ error: 'Phone and new password are required' });
+  }
+  if (newPassword.length < 6) {
+    return res.status(400).json({ error: 'New password must be at least 6 characters' });
+  }
+
+  // Normalize phone number
+  phone = normalizePhone(phone);
+  console.log('Reset password for employee normalized phone:', phone);
+
+  try {
+    // Find employee by normalized phone number
+    const { data: employee, error: findError } = await supabaseAdmin
+      .from('employees_users')
+      .select('id')
+      .eq('phone_number', phone)
+      .single();
+
+    if (findError || !employee) {
+      console.error('Employee not found for phone:', phone, findError);
+      return res.status(404).json({ error: 'Employee not found' });
+    }
+
+    // Hash new password
+    const saltRounds = 10;
+    const hashedPassword = await bcrypt.hash(newPassword, saltRounds);
+
+    // Update password in database
+    const { error: updateError } = await supabaseAdmin
+      .from('employees_users')
+      .update({ password_hash: hashedPassword })
+      .eq('id', employee.id);
+
+    if (updateError) {
+      console.error('Reset password update error:', updateError);
+      return res.status(500).json({ error: 'Failed to reset password' });
+    }
+
+    res.json({ message: 'Password reset successfully' });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 module.exports = router;
 
 // ------------------- GET ADMINS (from admin_users) -------------------
