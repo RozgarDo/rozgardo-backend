@@ -274,7 +274,54 @@ router.put('/profile/:id', async (req, res) => {
   }
 });
 
-// ------------------- EMPLOYEE LOGIN (returns all fields) -------------------
+
+
+// // ------------------- EMPLOYEE LOGIN (returns all fields) -------------------
+// router.post('/employee-login', async (req, res) => {
+//   let { phone, password } = req.body;
+//   if (!phone || !password) return res.status(400).json({ error: 'Phone and password required' });
+//   phone = normalizePhone(phone);
+//   try {
+//     const { data: employee, error } = await supabaseAdmin
+//       .from('employees_users')
+//       .select('*')
+//       .eq('phone_number', phone)
+//       .single();
+//     if (error || !employee) return res.status(404).json({ error: 'Employee not found' });
+//     const isValid = await bcrypt.compare(password, employee.password_hash);
+//     if (!isValid) return res.status(401).json({ error: 'Invalid password' });
+//     const safe = stripPassword(employee);
+//     const user = {
+//       ...safe,
+//       name: safe.full_name,
+//       phone: safe.phone_number,
+//       role: 'employee',
+//       id: safe.id,
+//       first_name: safe.full_name?.split(' ')[0] || '',
+//       last_name: safe.full_name?.split(' ').slice(1).join(' ') || '',
+//       email: safe.email,
+//       bio: safe.bio,
+//       photo_url: safe.photo_url,
+//       location: safe.location,
+//       skills: safe.skills || [],
+//       experience: safe.experience || [],
+//       job_type: safe.job_type || 'Full-time',
+//       preferred_location: safe.preferred_location,
+//       expected_salary: safe.expected_salary,
+//       highest_qualification: safe.highest_qualification,
+//       job_types: safe.job_types || [],
+//       preferred_languages: safe.preferred_languages || [],
+//     };
+//     delete user.full_name;
+//     delete user.phone_number;
+//     res.json({ message: 'Login successful', user });
+//   } catch (err) {
+//     console.error(err);
+//     res.status(500).json({ error: 'Internal server error' });
+//   }
+// });
+
+
 router.post('/employee-login', async (req, res) => {
   let { phone, password } = req.body;
   if (!phone || !password) return res.status(400).json({ error: 'Phone and password required' });
@@ -286,6 +333,12 @@ router.post('/employee-login', async (req, res) => {
       .eq('phone_number', phone)
       .single();
     if (error || !employee) return res.status(404).json({ error: 'Employee not found' });
+
+    // **** ADD THIS STATUS CHECK ****
+    if (employee.account_status === 'deactivated') {
+      return res.status(403).json({ code: 'account_deactivated', error: 'Account is deactivated. Please reactivate.' });
+    }
+
     const isValid = await bcrypt.compare(password, employee.password_hash);
     if (!isValid) return res.status(401).json({ error: 'Invalid password' });
     const safe = stripPassword(employee);
@@ -319,6 +372,7 @@ router.post('/employee-login', async (req, res) => {
   }
 });
 
+
 // ------------------- FIXED: OTP Routes (use supabaseAdmin for existence checks) -------------------
 router.post('/employee/send-otp', async (req, res) => {
   let { phone } = req.body;
@@ -346,27 +400,80 @@ router.post('/employee/send-otp', async (req, res) => {
 });
 
 
-// ------------------- EMPLOYEE OTP VERIFY -------------------
+// // ------------------- EMPLOYEE OTP VERIFY -------------------
+// router.post('/employee/verify-otp', async (req, res) => {
+//   let { phone, otp } = req.body;
+//   if (!phone || !otp) return res.status(400).json({ error: 'Phone and OTP required' });
+//   phone = normalizePhone(phone);
+//   try {
+//     const { error: verifyError } = await supabase.auth.verifyOtp({ phone, token: otp, type: 'sms' });
+//     if (verifyError) return res.status(401).json({ error: 'Invalid or expired OTP' });
+//     const { data: employee, error: userError } = await supabaseAdmin
+//       .from('employees_users')
+//       .select('*')
+//       .eq('phone_number', phone)
+//       .single();
+//     if (userError || !employee) return res.status(404).json({ error: 'Employee profile not found' });
+//     const safe = stripPassword(employee);
+//     const user = {
+//       ...safe,
+//       name: safe.full_name,
+//       phone: safe.phone_number,
+//       role: 'employee',
+//       id: safe.id,
+//       first_name: safe.full_name?.split(' ')[0] || '',
+//       last_name: safe.full_name?.split(' ').slice(1).join(' ') || '',
+//       email: safe.email,
+//       bio: safe.bio,
+//       photo_url: safe.photo_url,
+//       location: safe.location,
+//       skills: safe.skills || [],
+//       experience: safe.experience || [],
+//       job_type: safe.job_type || 'Full-time',
+//       preferred_location: safe.preferred_location,
+//       expected_salary: safe.expected_salary,
+//       highest_qualification: safe.highest_qualification,
+//       job_types: safe.job_types || [],
+//       preferred_languages: safe.preferred_languages || [],
+//     };
+//     delete user.full_name;
+//     delete user.phone_number;
+//     res.json({ user, message: 'Login successful' });
+//   } catch (err) {
+//     console.error(err);
+//     res.status(500).json({ error: 'Internal server error' });
+//   }
+// });
+
+
 router.post('/employee/verify-otp', async (req, res) => {
   let { phone, otp } = req.body;
   if (!phone || !otp) return res.status(400).json({ error: 'Phone and OTP required' });
   phone = normalizePhone(phone);
   try {
-    const { error: verifyError } = await supabase.auth.verifyOtp({ phone, token: otp, type: 'sms' });
-    if (verifyError) return res.status(401).json({ error: 'Invalid or expired OTP' });
-    const { data: employee, error: userError } = await supabaseAdmin
+    // First, check if the employee exists and get account status
+    const { data: employee, error: findError } = await supabaseAdmin
       .from('employees_users')
       .select('*')
       .eq('phone_number', phone)
       .single();
-    if (userError || !employee) return res.status(404).json({ error: 'Employee profile not found' });
+    if (findError || !employee) return res.status(404).json({ error: 'Employee profile not found' });
+
+    // **** ADD STATUS CHECK BEFORE OTP VERIFICATION ****
+    if (employee.account_status === 'deactivated') {
+      return res.status(403).json({ code: 'account_deactivated', error: 'Account is deactivated. Please reactivate.' });
+    }
+
+    // Verify OTP
+    const { error: verifyError } = await supabase.auth.verifyOtp({ phone, token: otp, type: 'sms' });
+    if (verifyError) return res.status(401).json({ error: 'Invalid or expired OTP' });
+
     const safe = stripPassword(employee);
     const user = {
-      ...safe,
+      id: safe.id,
       name: safe.full_name,
       phone: safe.phone_number,
       role: 'employee',
-      id: safe.id,
       first_name: safe.full_name?.split(' ')[0] || '',
       last_name: safe.full_name?.split(' ').slice(1).join(' ') || '',
       email: safe.email,
@@ -391,7 +498,46 @@ router.post('/employee/verify-otp', async (req, res) => {
   }
 });
 
-// ------------------- EMPLOYER LOGIN (returns all fields) -------------------
+// // ------------------- EMPLOYER LOGIN (returns all fields) -------------------
+// router.post('/employer-login', async (req, res) => {
+//   let { phone, password } = req.body;
+//   if (!phone || !password) return res.status(400).json({ error: 'Phone and password required' });
+//   phone = normalizePhone(phone);
+//   try {
+//     const { data: employer, error } = await supabaseAdmin
+//       .from('employers_users')
+//       .select('*')
+//       .eq('contact_number', phone)
+//       .single();
+//     if (error || !employer) return res.status(404).json({ error: 'Employer not found' });
+//     const isValid = await bcrypt.compare(password, employer.password_hash);
+//     if (!isValid) return res.status(401).json({ error: 'Invalid password' });
+//     const safe = stripPassword(employer);
+//     const user = {
+//       id: safe.id,
+//       name: safe.company_name,
+//       phone: safe.contact_number,
+//       role: 'employer',
+//       email: safe.official_email,
+//       company_name: safe.company_name,
+//       company_description: safe.company_description,
+//       photo_url: safe.photo_url,
+//       location: safe.office_location,
+//       hr_first_name: safe.hr_first_name,
+//       hr_last_name: safe.hr_last_name,
+//       hr_linkedin: safe.hr_linkedin,  // ✅ added
+//       website: safe.website,
+//       industry: safe.industry,
+//       employee_count: safe.employee_count,
+//     };
+//     res.json({ message: 'Login successful', user });
+//   } catch (err) {
+//     console.error(err);
+//     res.status(500).json({ error: 'Internal server error' });
+//   }
+// });
+
+
 router.post('/employer-login', async (req, res) => {
   let { phone, password } = req.body;
   if (!phone || !password) return res.status(400).json({ error: 'Phone and password required' });
@@ -403,6 +549,12 @@ router.post('/employer-login', async (req, res) => {
       .eq('contact_number', phone)
       .single();
     if (error || !employer) return res.status(404).json({ error: 'Employer not found' });
+
+    // **** ADD THIS STATUS CHECK ****
+    if (employer.account_status === 'deactivated') {
+      return res.status(403).json({ code: 'account_deactivated', error: 'Account is deactivated. Please reactivate.' });
+    }
+
     const isValid = await bcrypt.compare(password, employer.password_hash);
     if (!isValid) return res.status(401).json({ error: 'Invalid password' });
     const safe = stripPassword(employer);
@@ -418,7 +570,7 @@ router.post('/employer-login', async (req, res) => {
       location: safe.office_location,
       hr_first_name: safe.hr_first_name,
       hr_last_name: safe.hr_last_name,
-      hr_linkedin: safe.hr_linkedin,  // ✅ added
+      hr_linkedin: safe.hr_linkedin,
       website: safe.website,
       industry: safe.industry,
       employee_count: safe.employee_count,
@@ -456,19 +608,74 @@ router.post('/employer/send-otp', async (req, res) => {
   }
 });
 
+// router.post('/employer/verify-otp', async (req, res) => {
+//   let { phone, otp } = req.body;
+//   if (!phone || !otp) return res.status(400).json({ error: 'Phone and OTP are required' });
+//   phone = normalizePhone(phone);
+//   try {
+//     const { error: verifyError } = await supabase.auth.verifyOtp({ phone, token: otp, type: 'sms' });
+//     if (verifyError) return res.status(401).json({ error: 'Invalid or expired OTP' });
+//     const { data: employer, error: userError } = await supabaseAdmin
+//       .from('employers_users')
+//       .select('*')
+//       .eq('contact_number', phone)
+//       .single();
+//     if (userError || !employer) return res.status(404).json({ error: 'Employer profile not found' });
+//     const safe = stripPassword(employer);
+//     const user = {
+//       id: safe.id,
+//       name: safe.company_name,
+//       phone: safe.contact_number,
+//       role: 'employer',
+//       email: safe.official_email,
+//       company_name: safe.company_name,
+//       company_description: safe.company_description,
+//       photo_url: safe.photo_url,
+//       location: safe.office_location,
+//       hr_first_name: safe.hr_first_name,
+//       hr_last_name: safe.hr_last_name,
+//       hr_linkedin: safe.hr_linkedin,  // ✅ added
+//       website: safe.website,
+//       industry: safe.industry,
+//       employee_count: safe.employee_count,
+//     };
+//     res.json({ user, message: 'Login successful' });
+//   } catch (err) {
+//     console.error(err);
+//     res.status(500).json({ error: 'Internal server error' });
+//   }
+// });
+
+
+
 router.post('/employer/verify-otp', async (req, res) => {
   let { phone, otp } = req.body;
   if (!phone || !otp) return res.status(400).json({ error: 'Phone and OTP are required' });
   phone = normalizePhone(phone);
   try {
-    const { error: verifyError } = await supabase.auth.verifyOtp({ phone, token: otp, type: 'sms' });
-    if (verifyError) return res.status(401).json({ error: 'Invalid or expired OTP' });
-    const { data: employer, error: userError } = await supabaseAdmin
+    // First, check if the employer exists and get their account status
+    const { data: employer, error: findError } = await supabaseAdmin
       .from('employers_users')
       .select('*')
       .eq('contact_number', phone)
       .single();
-    if (userError || !employer) return res.status(404).json({ error: 'Employer profile not found' });
+    
+    if (findError || !employer) {
+      return res.status(404).json({ error: 'Employer profile not found' });
+    }
+
+    // Check account status BEFORE OTP verification
+    if (employer.account_status === 'deactivated') {
+      return res.status(403).json({ code: 'account_deactivated', error: 'Account is deactivated. Please reactivate.' });
+    }
+
+    // Now verify OTP
+    const { error: verifyError } = await supabase.auth.verifyOtp({ phone, token: otp, type: 'sms' });
+    if (verifyError) {
+      console.error('OTP verification error:', verifyError);
+      return res.status(401).json({ error: 'Invalid or expired OTP' });
+    }
+
     const safe = stripPassword(employer);
     const user = {
       id: safe.id,
@@ -482,7 +689,7 @@ router.post('/employer/verify-otp', async (req, res) => {
       location: safe.office_location,
       hr_first_name: safe.hr_first_name,
       hr_last_name: safe.hr_last_name,
-      hr_linkedin: safe.hr_linkedin,  // ✅ added
+      hr_linkedin: safe.hr_linkedin,
       website: safe.website,
       industry: safe.industry,
       employee_count: safe.employee_count,
@@ -493,6 +700,7 @@ router.post('/employer/verify-otp', async (req, res) => {
     res.status(500).json({ error: 'Internal server error' });
   }
 });
+
 
 // ------------------- EMPLOYEE REGISTRATION -------------------
 router.post('/employee-register', async (req, res) => {
@@ -686,11 +894,36 @@ router.post('/admin/login', async (req, res) => {
 });
 
 // ------------------- GET EMPLOYEES (for admin) -------------------
+// router.get('/employees', async (req, res) => {
+//   try {
+//     const { data, error } = await supabaseAdmin
+//       .from('employees_users')
+//       .select('*')
+//       .order('created_at', { ascending: false });
+//     if (error) return res.status(400).json({ error: error.message });
+//     const safeData = data.map(emp => {
+//       const { password_hash, ...rest } = emp;
+//       return {
+//         ...rest,
+//         id: emp.id,
+//         name: emp.full_name,
+//         phone: emp.phone_number,
+//         role: 'employee'
+//       };
+//     });
+//     res.json(safeData);
+//   } catch (err) {
+//     res.status(500).json({ error: err.message });
+//   }
+// });
+
+
 router.get('/employees', async (req, res) => {
   try {
     const { data, error } = await supabaseAdmin
       .from('employees_users')
       .select('*')
+      .eq('account_status', 'active')   // <-- Only active employees
       .order('created_at', { ascending: false });
     if (error) return res.status(400).json({ error: error.message });
     const safeData = data.map(emp => {
@@ -709,12 +942,40 @@ router.get('/employees', async (req, res) => {
   }
 });
 
+
+
 // ------------------- GET EMPLOYERS (for admin) -------------------
+// router.get('/employers', async (req, res) => {
+//   try {
+//     const { data, error } = await supabaseAdmin
+//       .from('employers_users')
+//       .select('*')
+//       .order('created_at', { ascending: false });
+
+//     if (error) return res.status(400).json({ error: error.message });
+//     const safeData = data.map(emp => {
+//       const { password_hash, ...rest } = emp;
+//       return {
+//         ...rest,
+//         id: emp.id,
+//         name: emp.company_name,
+//         phone: emp.contact_number,
+//         role: 'employer'
+//       };
+//     });
+//     res.json(safeData);
+//   } catch (err) {
+//     res.status(500).json({ error: err.message });
+//   }
+// });
+
+
 router.get('/employers', async (req, res) => {
   try {
     const { data, error } = await supabaseAdmin
       .from('employers_users')
       .select('*')
+      .eq('account_status', 'active')   // Only show active employers
       .order('created_at', { ascending: false });
 
     if (error) return res.status(400).json({ error: error.message });
@@ -733,6 +994,7 @@ router.get('/employers', async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
+
 
 // ------------------- LEGACY LOGIN ROUTES (unchanged) -------------------
 router.post('/login', async (req, res) => {
@@ -985,6 +1247,145 @@ router.post('/employee/reset-password', async (req, res) => {
     }
 
     res.json({ message: 'Password reset successfully' });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+
+
+
+// ------------------- DEACTIVATE EMPLOYEE ACCOUNT (soft) -------------------
+router.put('/employee/deactivate-account', async (req, res) => {
+  const { userId } = req.body;
+  if (!userId) {
+    return res.status(400).json({ error: 'User ID is required' });
+  }
+
+  try {
+    const { error: updateError } = await supabaseAdmin
+      .from('employees_users')
+      .update({ account_status: 'deactivated' })
+      .eq('id', userId);
+    if (updateError) {
+      console.error('Deactivation error:', updateError);
+      return res.status(500).json({ error: 'Failed to deactivate account' });
+    }
+    res.json({ message: 'Account deactivated successfully' });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// ------------------- REACTIVATE EMPLOYEE ACCOUNT -------------------
+router.put('/employee/reactivate-account', async (req, res) => {
+  let { phone } = req.body;
+  if (!phone) return res.status(400).json({ error: 'Phone number is required' });
+  phone = normalizePhone(phone);
+  try {
+    const { error: updateError } = await supabaseAdmin
+      .from('employees_users')
+      .update({ account_status: 'active' })
+      .eq('phone_number', phone);
+    if (updateError) {
+      console.error('Reactivation error:', updateError);
+      return res.status(500).json({ error: 'Failed to reactivate account' });
+    }
+    res.json({ message: 'Account reactivated successfully' });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+
+
+// ------------------- DELETE EMPLOYEE ACCOUNT (hard delete) -------------------
+router.delete('/employee/delete-account', async (req, res) => {
+  const { userId } = req.body;
+  if (!userId) {
+    return res.status(400).json({ error: 'User ID is required' });
+  }
+
+  try {
+    // 1. Delete all applications
+    await supabaseAdmin.from('applications').delete().eq('employee_id', userId);
+    // 2. Delete employee profile
+    await supabaseAdmin.from('employees_users').delete().eq('id', userId);
+    // 3. Delete Supabase Auth user
+    await supabaseAdmin.auth.admin.deleteUser(userId);
+    res.json({ message: 'Account deleted permanently' });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+
+
+
+// ------------------- DEACTIVATE EMPLOYER ACCOUNT -------------------
+router.put('/employer/deactivate-account', async (req, res) => {
+  const { userId } = req.body;
+  if (!userId) return res.status(400).json({ error: 'User ID is required' });
+  try {
+    const { error: updateError } = await supabaseAdmin
+      .from('employers_users')
+      .update({ account_status: 'deactivated' })
+      .eq('id', userId);
+    if (updateError) {
+      console.error('Deactivation error:', updateError);
+      return res.status(500).json({ error: 'Failed to deactivate account' });
+    }
+    res.json({ message: 'Account deactivated successfully' });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// ------------------- REACTIVATE EMPLOYER ACCOUNT -------------------
+router.put('/employer/reactivate-account', async (req, res) => {
+  let { phone } = req.body;
+  if (!phone) return res.status(400).json({ error: 'Phone number is required' });
+  phone = normalizePhone(phone);
+  try {
+    const { error: updateError } = await supabaseAdmin
+      .from('employers_users')
+      .update({ account_status: 'active' })
+      .eq('contact_number', phone);
+    if (updateError) {
+      console.error('Reactivation error:', updateError);
+      return res.status(500).json({ error: 'Failed to reactivate account' });
+    }
+    res.json({ message: 'Account reactivated successfully' });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// ------------------- DELETE EMPLOYER ACCOUNT (hard delete) -------------------
+router.delete('/employer/delete-account', async (req, res) => {
+  const { userId } = req.body;
+  if (!userId) return res.status(400).json({ error: 'User ID is required' });
+  try {
+    // 1. Find all jobs posted by this employer
+    const { data: jobs } = await supabaseAdmin.from('jobs').select('id').eq('employer_id', userId);
+    if (jobs && jobs.length > 0) {
+      const jobIds = jobs.map(j => j.id);
+      // Delete all applications for those jobs
+      await supabaseAdmin.from('applications').delete().in('job_id', jobIds);
+      // Delete all jobs
+      await supabaseAdmin.from('jobs').delete().eq('employer_id', userId);
+    }
+    // 2. Delete employer profile
+    await supabaseAdmin.from('employers_users').delete().eq('id', userId);
+    // 3. Delete Supabase Auth user
+    await supabaseAdmin.auth.admin.deleteUser(userId);
+    res.json({ message: 'Account deleted permanently' });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Internal server error' });

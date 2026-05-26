@@ -2,31 +2,7 @@ const express = require('express');
 const router = express.Router();
 const supabase = require('../supabaseClient');
 
-// Helper: enrich jobs with employer name from employer_profiles table
-// async function enrichJobsWithEmployerName(jobs) {
-//     const employerIds = [...new Set(jobs.map(j => j.employer_id).filter(Boolean))];
-//     if (employerIds.length === 0) return jobs.map(j => ({ ...j, employer_name: 'Unknown' }));
 
-//     const { data: profiles } = await supabase
-//         .from('employer_profiles')
-//         .select('user_id, company_name')
-//         .in('user_id', employerIds);
-
-//     const employerMap = {};
-//     (profiles || []).forEach(p => { employerMap[p.user_id] = p.company_name; });
-
-//     // Fallback to fetch from users table if profile not properly linked
-//     const missingIds = employerIds.filter(id => !employerMap[id]);
-//     if (missingIds.length > 0) {
-//         const { data: fallbackUsers } = await supabase.from('users').select('id, name').in('id', missingIds);
-//         (fallbackUsers || []).forEach(u => { employerMap[u.id] = u.name; });
-//     }
-
-//     return jobs.map(job => ({
-//         ...job,
-//         employer_name: employerMap[job.employer_id] || 'Unknown Employer'
-//     }));
-// }
 
 
 // Helper: enrich jobs with employer name from employers_users or fallback
@@ -68,57 +44,79 @@ async function enrichJobsWithEmployerName(jobs) {
 
 
 // Get jobs (supports query params: status, employer_id, is_active, category, location, limit)
-router.get('/', async (req, res) => {
-    const { status, employer_id, is_active, category, location, limit } = req.query;
-    let query = supabase.from('jobs').select('*').order('created_at', { ascending: false });
+// router.get('/', async (req, res) => {
+//     const { status, employer_id, is_active, category, location, limit } = req.query;
+//     let query = supabase.from('jobs').select('*').order('created_at', { ascending: false });
     
-    if (status) query = query.eq('status', status);
-    if (employer_id) query = query.eq('employer_id', employer_id);
-    if (category) query = query.eq('category', category);
-    if (location) query = query.eq('location', location);
-    if (is_active !== undefined) query = query.eq('is_active', is_active === 'true');
-    if (limit) query = query.limit(parseInt(limit));
+//     if (status) query = query.eq('status', status);
+//     if (employer_id) query = query.eq('employer_id', employer_id);
+//     if (category) query = query.eq('category', category);
+//     if (location) query = query.eq('location', location);
+//     if (is_active !== undefined) query = query.eq('is_active', is_active === 'true');
+//     if (limit) query = query.limit(parseInt(limit));
     
-    try {
-        const { data, error } = await query;
-        if (error) return res.status(400).json({ error: error.message });
-        const enriched = await enrichJobsWithEmployerName(data);
-        res.json(enriched);
-    } catch (err) {
-        res.status(500).json({ error: err.message });
-    }
-});
-
-// // Get single job details (with employer name)
-// router.get('/:id', async (req, res) => {
 //     try {
-//         const { data, error } = await supabase
-//             .from('jobs')
-//             .select('*')
-//             .eq('id', req.params.id)
-//             .single();
+//         const { data, error } = await query;
 //         if (error) return res.status(400).json({ error: error.message });
-        
-//         // Get employer name
-//         if (data.employer_id) {
-//             const { data: profile } = await supabase
-//                 .from('employer_profiles')
-//                 .select('company_name')
-//                 .eq('user_id', data.employer_id)
-//                 .single();
-//             if (profile?.company_name) {
-//                 data.employer_name = profile.company_name;
-//             } else {
-//                 const { data: user } = await supabase.from('users').select('name').eq('id', data.employer_id).single();
-//                 data.employer_name = user?.name || 'Unknown Employer';
-//             }
-//         }
-        
-//         res.json(data);
+//         const enriched = await enrichJobsWithEmployerName(data);
+//         res.json(enriched);
 //     } catch (err) {
 //         res.status(500).json({ error: err.message });
 //     }
 // });
+
+
+router.get('/', async (req, res) => {
+    const { status, employer_id, is_active, category, location, limit } = req.query;
+    
+    try {
+        // 1. First, get all active employer IDs
+        const { data: activeEmployers, error: employerError } = await supabase
+            .from('employers_users')
+            .select('id')
+            .eq('account_status', 'active');
+        
+        if (employerError) {
+            console.error('Error fetching active employers:', employerError);
+            return res.status(500).json({ error: 'Failed to fetch active employers' });
+        }
+        
+        const activeEmployerIds = (activeEmployers || []).map(e => e.id);
+        
+        // If no active employers, return empty array quickly
+        if (activeEmployerIds.length === 0) {
+            return res.json([]);
+        }
+        
+        // 2. Query jobs with employer_id in active list
+        let query = supabase.from('jobs').select('*').order('created_at', { ascending: false });
+        
+        if (status) query = query.eq('status', status);
+        if (employer_id) query = query.eq('employer_id', employer_id);
+        if (category) query = query.eq('category', category);
+        if (location) query = query.eq('location', location);
+        if (is_active !== undefined) query = query.eq('is_active', is_active === 'true');
+        if (limit) query = query.limit(parseInt(limit));
+        
+        // Filter by active employer IDs
+        if (activeEmployerIds.length > 0) {
+            query = query.in('employer_id', activeEmployerIds);
+        } else {
+            // Should not reach here because we already checked empty, but just in case:
+            return res.json([]);
+        }
+        
+        const { data, error } = await query;
+        if (error) return res.status(400).json({ error: error.message });
+        
+        const enriched = await enrichJobsWithEmployerName(data);
+        res.json(enriched);
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: err.message });
+    }
+});
+
 
 
 
@@ -172,32 +170,7 @@ router.post('/', async (req, res) => {
     }
 });
 
-// Post a new job (Defaults to pending status)
-// router.post('/', async (req, res) => {
-//     const { title, category, salary, location, description, employer_id, job_type } = req.body;
-//     try {
-//         const { data, error } = await supabase
-//             .from('jobs')
-//             .insert([{ 
-//                 title, 
-//                 category, 
-//                 salary, 
-//                 location, 
-//                 description: description || 'No description provided.', 
-//                 employer_id, 
-//                 job_type: job_type || 'Full-time',
-//                 status: 'pending',
-//                 is_active: true
-//             }])
-//             .select()
-//             .single();
 
-//         if (error) return res.status(400).json({ error: error.message });
-//         res.status(201).json({ message: 'Job posted successfully', job: data });
-//     } catch (err) {
-//         res.status(500).json({ error: err.message });
-//     }
-// });
 
 // Update job status (Admin functionality)
 router.patch('/:id/status', async (req, res) => {
@@ -222,51 +195,108 @@ router.patch('/:id/status', async (req, res) => {
 });
 
 // Get single job details (with employer name from all possible tables)
+// router.get('/:id', async (req, res) => {
+//     try {
+//         const { data, error } = await supabase
+//             .from('jobs')
+//             .select('*')
+//             .eq('id', req.params.id)
+//             .single();
+//         if (error) return res.status(400).json({ error: error.message });
+        
+//         // Get employer name - try in order: employers_users -> employer_profiles -> users
+//         if (data.employer_id) {
+//             let employerName = null;
+            
+//             // 1. Try new employers_users table (used by your auth)
+//             const { data: employerFromNew } = await supabase
+//                 .from('employers_users')
+//                 .select('company_name')
+//                 .eq('id', data.employer_id)
+//                 .single();
+//             if (employerFromNew?.company_name) {
+//                 employerName = employerFromNew.company_name;
+//             } else {
+//                 // 2. Fallback to old employer_profiles
+//                 const { data: profile } = await supabase
+//                     .from('employer_profiles')
+//                     .select('company_name')
+//                     .eq('user_id', data.employer_id)
+//                     .single();
+//                 if (profile?.company_name) {
+//                     employerName = profile.company_name;
+//                 } else {
+//                     // 3. Final fallback to legacy users table
+//                     const { data: user } = await supabase
+//                         .from('users')
+//                         .select('name')
+//                         .eq('id', data.employer_id)
+//                         .single();
+//                     employerName = user?.name || 'Unknown Employer';
+//                 }
+//             }
+//             data.employer_name = employerName;
+//         }
+        
+//         res.json(data);
+//     } catch (err) {
+//         res.status(500).json({ error: err.message });
+//     }
+// });
+
 router.get('/:id', async (req, res) => {
     try {
-        const { data, error } = await supabase
+        const { data: job, error } = await supabase
             .from('jobs')
             .select('*')
             .eq('id', req.params.id)
             .single();
         if (error) return res.status(400).json({ error: error.message });
         
-        // Get employer name - try in order: employers_users -> employer_profiles -> users
-        if (data.employer_id) {
+        // Check if employer exists and is active
+        const { data: employer, error: empError } = await supabase
+            .from('employers_users')
+            .select('account_status')
+            .eq('id', job.employer_id)
+            .single();
+        
+        if (empError || !employer || employer.account_status !== 'active') {
+            return res.status(404).json({ error: 'Job not found or employer is inactive' });
+        }
+        
+        // Get employer name for display
+        if (job.employer_id) {
             let employerName = null;
-            
-            // 1. Try new employers_users table (used by your auth)
             const { data: employerFromNew } = await supabase
                 .from('employers_users')
                 .select('company_name')
-                .eq('id', data.employer_id)
+                .eq('id', job.employer_id)
                 .single();
             if (employerFromNew?.company_name) {
                 employerName = employerFromNew.company_name;
             } else {
-                // 2. Fallback to old employer_profiles
                 const { data: profile } = await supabase
                     .from('employer_profiles')
                     .select('company_name')
-                    .eq('user_id', data.employer_id)
+                    .eq('user_id', job.employer_id)
                     .single();
                 if (profile?.company_name) {
                     employerName = profile.company_name;
                 } else {
-                    // 3. Final fallback to legacy users table
                     const { data: user } = await supabase
                         .from('users')
                         .select('name')
-                        .eq('id', data.employer_id)
+                        .eq('id', job.employer_id)
                         .single();
                     employerName = user?.name || 'Unknown Employer';
                 }
             }
-            data.employer_name = employerName;
+            job.employer_name = employerName;
         }
         
-        res.json(data);
+        res.json(job);
     } catch (err) {
+        console.error(err);
         res.status(500).json({ error: err.message });
     }
 });
