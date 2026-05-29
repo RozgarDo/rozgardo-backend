@@ -339,6 +339,10 @@ router.post('/employee-login', async (req, res) => {
       return res.status(403).json({ code: 'account_deactivated', error: 'Account is deactivated. Please reactivate.' });
     }
 
+    if (employee.account_status === 'suspended') {
+  return res.status(403).json({ code: 'account_suspended', error: 'Account suspended. Contact support.' });
+}
+
     const isValid = await bcrypt.compare(password, employee.password_hash);
     if (!isValid) return res.status(401).json({ error: 'Invalid password' });
     const safe = stripPassword(employee);
@@ -374,6 +378,32 @@ router.post('/employee-login', async (req, res) => {
 
 
 // ------------------- FIXED: OTP Routes (use supabaseAdmin for existence checks) -------------------
+// router.post('/employee/send-otp', async (req, res) => {
+//   let { phone } = req.body;
+//   if (!phone) return res.status(400).json({ error: 'Phone number is required' });
+//   phone = normalizePhone(phone);
+//   try {
+//     const { data: employee, error: findError } = await supabaseAdmin
+//       .from('employees_users')
+//       .select('id')
+//       .eq('phone_number', phone)
+//       .single();
+//     if (findError || !employee) {
+//       return res.status(404).json({ error: 'Employee not found. Please register first.' });
+//     }
+//     const { error: otpError } = await supabase.auth.signInWithOtp({ phone });
+//     if (otpError) {
+//       console.error('Supabase OTP error:', otpError);
+//       return res.status(500).json({ error: 'Failed to send OTP. Please try again later.' });
+//     }
+//     res.json({ message: 'OTP sent successfully to your mobile number.' });
+//   } catch (err) {
+//     console.error(err);
+//     res.status(500).json({ error: 'Internal server error' });
+//   }
+// });
+
+
 router.post('/employee/send-otp', async (req, res) => {
   let { phone } = req.body;
   if (!phone) return res.status(400).json({ error: 'Phone number is required' });
@@ -381,12 +411,17 @@ router.post('/employee/send-otp', async (req, res) => {
   try {
     const { data: employee, error: findError } = await supabaseAdmin
       .from('employees_users')
-      .select('id')
+      .select('id, account_status')
       .eq('phone_number', phone)
       .single();
     if (findError || !employee) {
       return res.status(404).json({ error: 'Employee not found. Please register first.' });
     }
+    // Block OTP sending only if account is suspended
+    if (employee.account_status === 'suspended') {
+      return res.status(403).json({ code: 'account_suspended', error: 'Account suspended. Contact support.' });
+    }
+    // Deactivated accounts can still receive OTP (reactivation will be handled later)
     const { error: otpError } = await supabase.auth.signInWithOtp({ phone });
     if (otpError) {
       console.error('Supabase OTP error:', otpError);
@@ -398,7 +433,6 @@ router.post('/employee/send-otp', async (req, res) => {
     res.status(500).json({ error: 'Internal server error' });
   }
 });
-
 
 // // ------------------- EMPLOYEE OTP VERIFY -------------------
 // router.post('/employee/verify-otp', async (req, res) => {
@@ -555,6 +589,10 @@ router.post('/employer-login', async (req, res) => {
       return res.status(403).json({ code: 'account_deactivated', error: 'Account is deactivated. Please reactivate.' });
     }
 
+    if (employer.account_status === 'suspended') {
+  return res.status(403).json({ code: 'account_suspended', error: 'Account suspended. Contact support.' });
+}
+
     const isValid = await bcrypt.compare(password, employer.password_hash);
     if (!isValid) return res.status(401).json({ error: 'Invalid password' });
     const safe = stripPassword(employer);
@@ -583,6 +621,32 @@ router.post('/employer-login', async (req, res) => {
 });
 
 // ------------------- EMPLOYER OTP ROUTES -------------------
+// router.post('/employer/send-otp', async (req, res) => {
+//   let { phone } = req.body;
+//   if (!phone) return res.status(400).json({ error: 'Phone number is required' });
+//   phone = normalizePhone(phone);
+//   try {
+//     const { data: employer, error: findError } = await supabaseAdmin
+//       .from('employers_users')
+//       .select('id')
+//       .eq('contact_number', phone)
+//       .single();
+//     if (findError || !employer) {
+//       return res.status(404).json({ error: 'Employer not found. Please register first.' });
+//     }
+//     const { error: otpError } = await supabase.auth.signInWithOtp({ phone });
+//     if (otpError) {
+//       console.error('Supabase OTP error:', otpError);
+//       return res.status(500).json({ error: 'Failed to send OTP' });
+//     }
+//     res.json({ message: 'OTP sent successfully to your mobile number.' });
+//   } catch (err) {
+//     console.error(err);
+//     res.status(500).json({ error: 'Internal server error' });
+//   }
+// });
+
+
 router.post('/employer/send-otp', async (req, res) => {
   let { phone } = req.body;
   if (!phone) return res.status(400).json({ error: 'Phone number is required' });
@@ -590,11 +654,14 @@ router.post('/employer/send-otp', async (req, res) => {
   try {
     const { data: employer, error: findError } = await supabaseAdmin
       .from('employers_users')
-      .select('id')
+      .select('id, account_status')
       .eq('contact_number', phone)
       .single();
     if (findError || !employer) {
       return res.status(404).json({ error: 'Employer not found. Please register first.' });
+    }
+    if (employer.account_status === 'suspended') {
+      return res.status(403).json({ code: 'account_suspended', error: 'Account suspended. Contact support.' });
     }
     const { error: otpError } = await supabase.auth.signInWithOtp({ phone });
     if (otpError) {
@@ -607,6 +674,8 @@ router.post('/employer/send-otp', async (req, res) => {
     res.status(500).json({ error: 'Internal server error' });
   }
 });
+
+
 
 // router.post('/employer/verify-otp', async (req, res) => {
 //   let { phone, otp } = req.body;
@@ -1389,6 +1458,148 @@ router.delete('/employer/delete-account', async (req, res) => {
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+
+
+
+
+
+
+
+
+
+
+
+// ------------------- ADMIN ROUTES -------------------
+
+// ------------------- ADMIN: UPDATE EMPLOYEE ACCOUNT STATUS (active/suspended) -------------------
+router.put('/admin/employee-status', async (req, res) => {
+  const { userId, status } = req.body;
+  if (!userId || !status) return res.status(400).json({ error: 'User ID and status are required' });
+  if (!['active', 'suspended'].includes(status)) {
+    return res.status(400).json({ error: 'Invalid status. Use "active" or "suspended".' });
+  }
+  try {
+    const { data, error } = await supabaseAdmin
+      .from('employees_users')
+      .update({ account_status: status })
+      .eq('id', userId)
+      .select('id, full_name, account_status')
+      .single();
+    if (error) throw error;
+    res.json({ message: `Employee account ${status}`, user: data });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ------------------- ADMIN: UPDATE EMPLOYER ACCOUNT STATUS (active/suspended) -------------------
+router.put('/admin/employer-status', async (req, res) => {
+  const { userId, status } = req.body;
+  if (!userId || !status) return res.status(400).json({ error: 'User ID and status are required' });
+  if (!['active', 'suspended'].includes(status)) {
+    return res.status(400).json({ error: 'Invalid status. Use "active" or "suspended".' });
+  }
+  try {
+    const { data, error } = await supabaseAdmin
+      .from('employers_users')
+      .update({ account_status: status })
+      .eq('id', userId)
+      .select('id, company_name, account_status')
+      .single();
+    if (error) throw error;
+    res.json({ message: `Employer account ${status}`, user: data });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ------------------- ADMIN: GET SINGLE EMPLOYEE DETAILS -------------------
+router.get('/admin/employee/:id', async (req, res) => {
+  const { id } = req.params;
+  try {
+    const { data, error } = await supabaseAdmin
+      .from('employees_users')
+      .select('*')
+      .eq('id', id)
+      .single();
+    if (error) throw error;
+    const { password_hash, ...safeData } = data;
+    res.json(safeData);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ------------------- ADMIN: GET SINGLE EMPLOYER DETAILS -------------------
+router.get('/admin/employer/:id', async (req, res) => {
+  const { id } = req.params;
+  try {
+    const { data, error } = await supabaseAdmin
+      .from('employers_users')
+      .select('*')
+      .eq('id', id)
+      .single();
+    if (error) throw error;
+    const { password_hash, ...safeData } = data;
+    res.json(safeData);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+
+// ------------------- ADMIN: GET ALL EMPLOYEES (including deactivated/suspended) -------------------
+router.get('/admin/all-employees', async (req, res) => {
+  try {
+    const { data, error } = await supabaseAdmin
+      .from('employees_users')
+      .select('*')
+      .order('created_at', { ascending: false });
+    if (error) return res.status(400).json({ error: error.message });
+    const safeData = data.map(emp => {
+      const { password_hash, ...rest } = emp;
+      return {
+        ...rest,
+        id: emp.id,
+        name: emp.full_name,
+        phone: emp.phone_number,
+        role: 'employee'
+      };
+    });
+    res.json(safeData);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ------------------- ADMIN: GET ALL EMPLOYERS (including deactivated/suspended) -------------------
+router.get('/admin/all-employers', async (req, res) => {
+  try {
+    const { data, error } = await supabaseAdmin
+      .from('employers_users')
+      .select('*')
+      .order('created_at', { ascending: false });
+    if (error) return res.status(400).json({ error: error.message });
+    const safeData = data.map(emp => {
+      const { password_hash, ...rest } = emp;
+      return {
+        ...rest,
+        id: emp.id,
+        name: emp.company_name,
+        phone: emp.contact_number,
+        role: 'employer'
+      };
+    });
+    res.json(safeData);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
   }
 });
 
