@@ -211,4 +211,48 @@ router.patch('/:id/status', async (req, res) => {
     }
 });
 
+
+// Withdraw an application (employee only)
+router.delete('/:id', async (req, res) => {
+    const { employee_id } = req.body; // employee_id must be sent in request body
+    const applicationId = req.params.id;
+
+    if (!employee_id) {
+        return res.status(400).json({ error: 'employee_id is required' });
+    }
+
+    try {
+        // First verify the application belongs to this employee
+        const { data: app, error: findError } = await supabase
+            .from('applications')
+            .select('id, employee_id')
+            .eq('id', applicationId)
+            .single();
+
+        if (findError || !app) {
+            return res.status(404).json({ error: 'Application not found' });
+        }
+
+        if (app.employee_id !== employee_id) {
+            return res.status(403).json({ error: 'You can only withdraw your own applications' });
+        }
+
+        // Delete the application
+        const { error: deleteError } = await supabase
+            .from('applications')
+            .delete()
+            .eq('id', applicationId);
+
+        if (deleteError) {
+            console.error('Delete error:', deleteError);
+            return res.status(400).json({ error: deleteError.message });
+        }
+
+        res.json({ message: 'Application withdrawn successfully' });
+    } catch (err) {
+        console.error('Server error during withdraw:', err);
+        res.status(500).json({ error: err.message });
+    }
+});
+
 module.exports = router;
