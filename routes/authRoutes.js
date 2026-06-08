@@ -366,6 +366,7 @@ router.post('/employee-login', async (req, res) => {
       highest_qualification: safe.highest_qualification,
       job_types: safe.job_types || [],
       preferred_languages: safe.preferred_languages || [],
+      phoneVerified: safe.phone_verified || false,
     };
     delete user.full_name;
     delete user.phone_number;
@@ -522,6 +523,7 @@ router.post('/employee/verify-otp', async (req, res) => {
       highest_qualification: safe.highest_qualification,
       job_types: safe.job_types || [],
       preferred_languages: safe.preferred_languages || [],
+      phoneVerified: safe.phone_verified || false
     };
     delete user.full_name;
     delete user.phone_number;
@@ -1602,6 +1604,91 @@ router.get('/admin/all-employers', async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
+
+
+
+
+
+
+
+
+
+// Add after existing routes, before module.exports
+
+// ------------------- SEND PHONE VERIFICATION OTP (for already logged in employee) -------------------
+router.post('/employee/send-phone-verification-otp', async (req, res) => {
+  const { phone } = req.body;
+  if (!phone) return res.status(400).json({ error: 'Phone number required' });
+  const normalizedPhone = normalizePhone(phone);
+  try {
+    // Check if employee exists
+    const { data: employee, error: findError } = await supabaseAdmin
+      .from('employees_users')
+      .select('id, phone_verified')
+      .eq('phone_number', normalizedPhone)
+      .single();
+    if (findError || !employee) {
+      return res.status(404).json({ error: 'Employee not found' });
+    }
+    if (employee.phone_verified) {
+      return res.status(400).json({ error: 'Phone already verified' });
+    }
+    // Send OTP using Supabase Auth
+    const { error: otpError } = await supabase.auth.signInWithOtp({ phone: normalizedPhone });
+    if (otpError) {
+      console.error('Supabase OTP error (phone verification):', otpError);
+      return res.status(500).json({ error: 'Failed to send OTP' });
+    }
+    res.json({ message: 'Verification OTP sent successfully' });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ------------------- VERIFY PHONE OTP AND UPDATE FLAG -------------------
+router.post('/employee/verify-phone-otp', async (req, res) => {
+  const { phone, otp } = req.body;
+  if (!phone || !otp) return res.status(400).json({ error: 'Phone and OTP required' });
+  const normalizedPhone = normalizePhone(phone);
+  try {
+    // Verify OTP with Supabase
+    const { error: verifyError } = await supabase.auth.verifyOtp({
+      phone: normalizedPhone,
+      token: otp,
+      type: 'sms'
+    });
+    if (verifyError) return res.status(401).json({ error: 'Invalid or expired OTP' });
+
+    // Update phone_verified to true
+    const { data, error: updateError } = await supabaseAdmin
+      .from('employees_users')
+      .update({ phone_verified: true })
+      .eq('phone_number', normalizedPhone)
+      .select('id, phone_number, phone_verified, full_name')
+      .single();
+
+    if (updateError) throw updateError;
+
+    res.json({
+      message: 'Phone verified successfully',
+      user: {
+        id: data.id,
+        phone: data.phone_number,
+        phoneVerified: data.phone_verified,
+        name: data.full_name
+      }
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+
+
+
+
 
 module.exports = router;
 
