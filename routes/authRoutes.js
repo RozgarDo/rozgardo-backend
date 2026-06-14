@@ -3,6 +3,9 @@ const router = express.Router();
 const bcrypt = require('bcrypt');
 const { createClient } = require('@supabase/supabase-js');
 const supabase = require('../supabaseClient');
+const jwt = require('jsonwebtoken');
+
+
 const supabaseAdmin = createClient(
   process.env.SUPABASE_URL,
   process.env.SUPABASE_SERVICE_ROLE_KEY,
@@ -712,38 +715,35 @@ router.post('/employer-register', async (req, res) => {
 
 // ------------------- ADMIN LOGIN -------------------
 router.post('/admin/login', async (req, res) => {
-  const { loginId, password } = req.body;
-  if (!loginId || !password) {
-    return res.status(400).json({ error: 'Login ID and password are required' });
-  }
-  try {
-    const { data: admin, error } = await supabaseAdmin
-      .from('admin_users')
-      .select('*')
-      .eq('login_id', loginId)
-      .single();
-    if (error || !admin) {
-      return res.status(404).json({ error: 'Admin not found' });
+    const { loginId, password } = req.body;
+    if (!loginId || !password) {
+        return res.status(400).json({ error: 'Login ID and password are required' });
     }
-    const isValid = await bcrypt.compare(password, admin.password_hash);
-    if (!isValid) {
-      return res.status(401).json({ error: 'Invalid password' });
+    try {
+        const { data: admin, error } = await supabaseAdmin
+            .from('admin_users')
+            .select('*')
+            .eq('login_id', loginId)
+            .single();
+        if (error || !admin) return res.status(404).json({ error: 'Admin not found' });
+        
+        const isValid = await bcrypt.compare(password, admin.password_hash);
+        if (!isValid) return res.status(401).json({ error: 'Invalid password' });
+        
+        // Generate JWT token
+        const token = jwt.sign(
+            { id: admin.id, role: 'admin' },
+            process.env.JWT_SECRET,
+            { expiresIn: '7d' }
+        );
+        
+        const { password_hash, ...safeAdmin } = admin;
+        res.json({ message: 'Login successful', user: safeAdmin, token });
+    } catch (err) {
+        console.error('Admin login error:', err);
+        res.status(500).json({ error: 'Internal server error' });
     }
-    const { password_hash, ...safeAdmin } = admin;
-    const user = {
-      ...safeAdmin,
-      id: safeAdmin.id,
-      name: safeAdmin.name || 'Admin',
-      role: 'admin',
-    };
-    res.json({ message: 'Login successful', user });
-  } catch (err) {
-    console.error('Admin login error:', err);
-    res.status(500).json({ error: 'Internal server error' });
-  }
 });
-
-
 
 router.get('/employees', async (req, res) => {
   try {
