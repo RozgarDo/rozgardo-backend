@@ -79,9 +79,10 @@ router.get('/employee/:id', async (req, res) => {
         if (!apps || apps.length === 0) return res.json([]);
 
         const enriched = await Promise.all(apps.map(async (app) => {
+            // ✅ INCLUDING jobs_serial_number
             const { data: job } = await supabase
                 .from('jobs')
-                .select('title, salary, location, job_type, employer_id, description, category')
+                .select('title, salary, location, job_type, employer_id, description, category, jobs_serial_number')
                 .eq('id', app.job_id)
                 .single();
 
@@ -210,7 +211,6 @@ router.patch('/:id/status', async (req, res) => {
         res.status(500).json({ error: err.message });
     }
 });
-
 
 // Withdraw an application (employee only)
 router.delete('/:id', async (req, res) => {

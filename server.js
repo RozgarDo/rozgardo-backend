@@ -30,7 +30,7 @@ app.use(async (req, res, next) => {
                 .single();
             if (admin && !adminErr) {
                 req.user = { id: admin.id, role: admin.role };
-                console.log(`🔐 Admin: ${admin.id} (${admin.role})`);
+                // console.log(`🔐 Admin: ${admin.id} (${admin.role})`);
             } else {
                 // Try regular users
                 const { data: user, error: userErr } = await supabase
@@ -40,7 +40,7 @@ app.use(async (req, res, next) => {
                     .single();
                 if (user && !userErr) {
                     req.user = { id: user.id, role: user.role || 'employee' };
-                    console.log(`🔐 User: ${user.id} (${user.role})`);
+                    // console.log(`🔐 User: ${user.id} (${user.role})`);
                 }
             }
         } catch (err) {
