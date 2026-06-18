@@ -8,7 +8,7 @@ const ALLOWED_STATUSES = ['applied', 'shortlisted', 'interview', 'selected', 're
 // Apply for a job
 router.post('/', async (req, res) => {
     let { job_id, employee_id } = req.body;
-    console.log(`Apply request received - Job: ${job_id}, Employee: ${employee_id}`);
+    // console.log(`Apply request received - Job: ${job_id}, Employee: ${employee_id}`);
     
     try {
         const { data: employee, error: empError } = await supabase

@@ -796,47 +796,6 @@ router.get('/employers', async (req, res) => {
   }
 });
 
-
-// ------------------- LEGACY LOGIN ROUTES (unchanged) -------------------
-router.post('/login', async (req, res) => {
-    const { loginId, password, otp, type } = req.body;
-    try {
-        let query = supabase.from('users').select(`
-            *,
-            applicant_profiles(*),
-            employer_profiles(*)
-        `);
-        if (loginId.includes('@')) {
-            query = query.eq('email', loginId);
-        } else {
-            query = query.eq('phone', loginId);
-        }
-        const { data: userData, error } = await query.single();
-        if (error || !userData) {
-            return res.status(404).json({ message: 'User not found' });
-        }
-        if (type === 'password') {
-            if (userData.password && userData.password !== password) {
-                return res.status(401).json({ message: 'Incorrect password' });
-            }
-        } else if (type === 'otp') {
-            if (otp !== '123456') {
-                 return res.status(401).json({ message: 'Invalid OTP entered' });
-            }
-        }
-        const profileData = userData.role === 'employee' 
-            ? (Array.isArray(userData.applicant_profiles) ? userData.applicant_profiles[0] : userData.applicant_profiles || {}) 
-            : (Array.isArray(userData.employer_profiles) ? userData.employer_profiles[0] : userData.employer_profiles || {});
-        delete userData.applicant_profiles;
-        delete userData.employer_profiles;
-        const flattenedUser = { ...profileData, ...userData, id: userData.id };
-        console.log(`User logged in: ${flattenedUser.name} (UUID: ${flattenedUser.id})`);
-        res.json({ message: 'Login successful', user: stripPassword(flattenedUser) });
-    } catch (error) {
-        res.status(500).json({ error: error.message });
-    }
-});
-
 router.post('/send-otp', async (req, res) => {
     const { phone } = req.body;
     try {
@@ -966,7 +925,7 @@ router.post('/employer/reset-password', async (req, res) => {
 
   // Normalize phone number to match database format
   phone = normalizePhone(phone);
-  console.log('Reset password for normalized phone:', phone);
+  // console.log('Reset password for normalized phone:', phone);
 
   try {
     // Find employer by normalized phone number
@@ -1017,7 +976,7 @@ router.post('/employee/reset-password', async (req, res) => {
 
   // Normalize phone number
   phone = normalizePhone(phone);
-  console.log('Reset password for employee normalized phone:', phone);
+  // console.log('Reset password for employee normalized phone:', phone);
 
   try {
     // Find employee by normalized phone number
@@ -1084,6 +1043,7 @@ router.put('/employee/deactivate-account', async (req, res) => {
 router.put('/employee/reactivate-account', async (req, res) => {
   let { phone } = req.body;
   if (!phone) return res.status(400).json({ error: 'Phone number is required' });
+  // console.log('Reactivate account for normalized phone:', phone);
   phone = normalizePhone(phone);
   try {
     const { error: updateError } = await supabaseAdmin
@@ -1495,6 +1455,56 @@ router.post('/employer/verify-phone-otp', async (req, res) => {
   }
 });
 
+
+// ------------------- CHANGE PASSWORD (admin) -------------------
+router.put('/admin/change-password', async (req, res) => {
+  const { userId, currentPassword, newPassword } = req.body;
+  if (!userId || !currentPassword || !newPassword) {
+    return res.status(400).json({ error: 'Missing required fields' });
+  }
+  if (newPassword.length < 6) {
+    return res.status(400).json({ error: 'New password must be at least 6 characters' });
+  }
+
+  try {
+    // Fetch admin from database
+    const { data: admin, error: fetchError } = await supabaseAdmin
+      .from('admin_users')
+      .select('password_hash')
+      .eq('id', userId)
+      .single();
+
+    if (fetchError || !admin) {
+      return res.status(404).json({ error: 'Admin not found' });
+    }
+
+    // Verify current password
+    const isValid = await bcrypt.compare(currentPassword, admin.password_hash);
+    if (!isValid) {
+      return res.status(401).json({ error: 'Current password is incorrect' });
+    }
+
+    // Hash new password
+    const saltRounds = 10;
+    const newHashedPassword = await bcrypt.hash(newPassword, saltRounds);
+
+    // Update database
+    const { error: updateError } = await supabaseAdmin
+      .from('admin_users')
+      .update({ password_hash: newHashedPassword })
+      .eq('id', userId);
+
+    if (updateError) {
+      console.error('Update error:', updateError);
+      return res.status(500).json({ error: 'Failed to update password' });
+    }
+
+    res.json({ message: 'Password updated successfully' });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
 
 module.exports = router;
 
