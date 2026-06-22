@@ -713,37 +713,9 @@ router.post('/employer-register', async (req, res) => {
   }
 });
 
-// ------------------- ADMIN LOGIN -------------------
-router.post('/admin/login', async (req, res) => {
-    const { loginId, password } = req.body;
-    if (!loginId || !password) {
-        return res.status(400).json({ error: 'Login ID and password are required' });
-    }
-    try {
-        const { data: admin, error } = await supabaseAdmin
-            .from('admin_users')
-            .select('*')
-            .eq('login_id', loginId)
-            .single();
-        if (error || !admin) return res.status(404).json({ error: 'Admin not found' });
-        
-        const isValid = await bcrypt.compare(password, admin.password_hash);
-        if (!isValid) return res.status(401).json({ error: 'Invalid password' });
-        
-        // Generate JWT token
-        const token = jwt.sign(
-            { id: admin.id, role: 'admin' },
-            process.env.JWT_SECRET,
-            { expiresIn: '7d' }
-        );
-        
-        const { password_hash, ...safeAdmin } = admin;
-        res.json({ message: 'Login successful', user: safeAdmin, token });
-    } catch (err) {
-        console.error('Admin login error:', err);
-        res.status(500).json({ error: 'Internal server error' });
-    }
-});
+
+
+
 
 router.get('/employees', async (req, res) => {
   try {
@@ -1154,16 +1126,6 @@ router.delete('/employer/delete-account', async (req, res) => {
 });
 
 
-
-
-
-
-
-
-
-
-
-
 // ------------------- ADMIN ROUTES -------------------
 
 // ------------------- ADMIN: UPDATE EMPLOYEE ACCOUNT STATUS (active/suspended) -------------------
@@ -1296,15 +1258,6 @@ router.get('/admin/all-employers', async (req, res) => {
 });
 
 
-
-
-
-
-
-
-
-// Add after existing routes, before module.exports
-
 // ------------------- SEND PHONE VERIFICATION OTP (for already logged in employee) -------------------
 router.post('/employee/send-phone-verification-otp', async (req, res) => {
   const { phone } = req.body;
@@ -1374,10 +1327,6 @@ router.post('/employee/verify-phone-otp', async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
-
-
-
-
 
 
 
@@ -1456,42 +1405,303 @@ router.post('/employer/verify-phone-otp', async (req, res) => {
 });
 
 
-// ------------------- CHANGE PASSWORD (admin) -------------------
+
+
+// ------------------- ADMIN LOGIN -------------------
+
+router.post('/admin/login', async (req, res) => {
+  const { loginId, password } = req.body;
+  if (!loginId || !password) {
+    return res.status(400).json({ error: 'Login ID and password are required' });
+  }
+  try {
+    const { data: admin, error } = await supabaseAdmin
+      .from('admin_users')
+      .select('*')
+      .eq('login_id', loginId)
+      .single();
+    if (error || !admin) return res.status(404).json({ error: 'Admin not found' });
+
+    const isValid = await bcrypt.compare(password, admin.password_hash);
+    if (!isValid) return res.status(401).json({ error: 'Invalid password' });
+
+    // 🔐 Include token_version in JWT payload
+    const token = jwt.sign(
+      {
+        id: admin.id,
+        role: 'admin',
+        token_version: admin.token_version || 1
+      },
+      process.env.JWT_SECRET,
+      { expiresIn: '7d' }
+    );
+
+    const { password_hash, ...safeAdmin } = admin;
+    res.json({ message: 'Login successful', user: safeAdmin, token });
+  } catch (err) {
+    console.error('Admin login error:', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+
+
+
+
+// // ------------------- CHANGE PASSWORD (admin) -------------------
+// router.put('/admin/change-password', async (req, res) => {
+//   const { userId, currentPassword, newPassword } = req.body;
+//   if (!userId || !currentPassword || !newPassword) {
+//     return res.status(400).json({ error: 'Missing required fields' });
+//   }
+//   if (newPassword.length < 6) {
+//     return res.status(400).json({ error: 'New password must be at least 6 characters' });
+//   }
+
+//   try {
+//     // Fetch admin with token_version
+//     const { data: admin, error: fetchError } = await supabaseAdmin
+//       .from('admin_users')
+//       .select('password_hash, token_version')
+//       .eq('id', userId)
+//       .single();
+
+//     if (fetchError || !admin) {
+//       return res.status(404).json({ error: 'Admin not found' });
+//     }
+
+//     // Verify current password
+//     const isValid = await bcrypt.compare(currentPassword, admin.password_hash);
+//     if (!isValid) {
+//       return res.status(401).json({ error: 'Current password is incorrect' });
+//     }
+
+//     // Hash new password
+//     const saltRounds = 10;
+//     const newHashedPassword = await bcrypt.hash(newPassword, saltRounds);
+
+//     // 🔐 Increment token_version (invalidate all old tokens)
+//     const newVersion = (admin.token_version || 1) + 1;
+
+//     // Update both password_hash and token_version
+//     const { error: updateError } = await supabaseAdmin
+//       .from('admin_users')
+//       .update({
+//         password_hash: newHashedPassword,
+//         token_version: newVersion
+//       })
+//       .eq('id', userId);
+
+//     if (updateError) {
+//       console.error('Update error:', updateError);
+//       return res.status(500).json({ error: 'Failed to update password' });
+//     }
+
+//     // 🔐 Issue a new token for the current device
+//     const newToken = jwt.sign(
+//       {
+//         id: userId,
+//         role: 'admin',
+//         token_version: newVersion
+//       },
+//       process.env.JWT_SECRET,
+//       { expiresIn: '7d' }
+//     );
+
+//     res.json({
+//       message: 'Password updated successfully',
+//       token: newToken   // Frontend should replace old token with this
+//     });
+//   } catch (err) {
+//     console.error(err);
+//     res.status(500).json({ error: 'Internal server error' });
+//   }
+// });
+
+
+//------------------- GET CURRENT ADMIN (with token validation) -------------------
+router.get('/me', async (req, res) => {
+  // The middleware attaches req.user if token is valid
+  if (!req.user) {
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+
+  if (req.user.role !== 'admin') {
+    return res.status(403).json({ error: 'Access denied' });
+  }
+
+  try {
+    const { data: admin, error } = await supabaseAdmin
+      .from('admin_users')
+      .select('id, login_id, name, role')
+      .eq('id', req.user.id)
+      .single();
+
+    if (error || !admin) {
+      return res.status(404).json({ error: 'Admin not found' });
+    }
+
+    res.json({ user: admin });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+
+
+// ------------------- ADMIN: GET ALL APPLICATIONS (manual join, includes employer name) -------------------
+router.get('/admin/applications', async (req, res) => {
+  try {
+    const { data: applications, error: appsError } = await supabaseAdmin
+      .from('applications')
+      .select('*')
+      .order('created_at', { ascending: false });
+
+    if (appsError) throw appsError;
+    if (!applications || applications.length === 0) {
+      return res.json([]);
+    }
+
+    const employeeIds = [...new Set(applications.map(app => app.employee_id).filter(Boolean))];
+    const jobIds = [...new Set(applications.map(app => app.job_id).filter(Boolean))];
+
+    const { data: employees, error: empError } = await supabaseAdmin
+      .from('employees_users')
+      .select('id, full_name, phone_number, email, skills')
+      .in('id', employeeIds);
+    if (empError) throw empError;
+
+    const { data: jobs, error: jobsError } = await supabaseAdmin
+      .from('jobs')
+      .select('id, title, category, salary, location, job_type, status, created_at, vacancies, description, required_experience, education, technical_skills, employer_id')
+      .in('id', jobIds);
+    if (jobsError) throw jobsError;
+
+    const employerIdsFromJobs = [...new Set(jobs.map(j => j.employer_id).filter(Boolean))];
+    const { data: employers, error: empEmployerError } = await supabaseAdmin
+      .from('employers_users')
+      .select('id, company_name')
+      .in('id', employerIdsFromJobs);
+    if (empEmployerError) throw empEmployerError;
+
+    const employerMap = {};
+    employers.forEach(emp => { employerMap[emp.id] = emp.company_name; });
+
+    const employeeMap = {};
+    employees.forEach(emp => { employeeMap[emp.id] = emp; });
+
+    const jobMap = {};
+    jobs.forEach(job => {
+      jobMap[job.id] = {
+        ...job,
+        employer_name: employerMap[job.employer_id] || 'Unknown Employer'
+      };
+    });
+
+    const enriched = applications.map(app => ({
+      ...app,
+      users: employeeMap[app.employee_id] || null,
+      jobs: jobMap[app.job_id] || null,
+    }));
+
+    res.json(enriched);
+  } catch (err) {
+    console.error('Error in /admin/applications:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+
+
+
+
+// ------------------- ADMIN SEND OTP (UNCOMMENT THIS) -------------------
+router.post('/admin/send-otp', async (req, res) => {
+  const { userId } = req.body;
+  if (!userId) return res.status(400).json({ error: 'User ID required' });
+
+  try {
+    const { data: admin, error } = await supabaseAdmin
+      .from('admin_users')
+      .select('phone')
+      .eq('id', userId)
+      .single();
+
+    if (error || !admin) throw new Error('Admin not found');
+    if (!admin.phone) {
+      return res.status(400).json({ error: 'No phone number registered. Contact support.' });
+    }
+
+    const { error: otpError } = await supabase.auth.signInWithOtp({
+      phone: admin.phone,
+    });
+
+    if (otpError) {
+      console.error('OTP send error:', otpError);
+      return res.status(500).json({ error: 'Failed to send OTP' });
+    }
+
+    res.json({ message: 'OTP sent successfully to your phone.' });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: err.message });
+  }
+});
 router.put('/admin/change-password', async (req, res) => {
-  const { userId, currentPassword, newPassword } = req.body;
-  if (!userId || !currentPassword || !newPassword) {
-    return res.status(400).json({ error: 'Missing required fields' });
+  const { userId, currentPassword, newPassword, otp } = req.body;
+
+  if (!userId || !currentPassword || !newPassword || !otp) {
+    return res.status(400).json({ error: 'Missing required fields: userId, currentPassword, newPassword, otp' });
   }
   if (newPassword.length < 6) {
     return res.status(400).json({ error: 'New password must be at least 6 characters' });
   }
 
   try {
-    // Fetch admin from database
     const { data: admin, error: fetchError } = await supabaseAdmin
       .from('admin_users')
-      .select('password_hash')
+      .select('password_hash, token_version, phone')
       .eq('id', userId)
       .single();
 
     if (fetchError || !admin) {
+      console.error('Fetch admin error:', fetchError);
       return res.status(404).json({ error: 'Admin not found' });
     }
 
-    // Verify current password
     const isValid = await bcrypt.compare(currentPassword, admin.password_hash);
     if (!isValid) {
       return res.status(401).json({ error: 'Current password is incorrect' });
     }
 
-    // Hash new password
+    if (!admin.phone) {
+      return res.status(400).json({ error: 'No phone number registered. Contact support.' });
+    }
+
+    const { error: verifyError } = await supabase.auth.verifyOtp({
+      phone: admin.phone,
+      token: otp,
+      type: 'sms'
+    });
+
+    if (verifyError) {
+      console.error('OTP verification error:', verifyError);
+      return res.status(401).json({ error: 'Invalid or expired OTP' });
+    }
+
     const saltRounds = 10;
     const newHashedPassword = await bcrypt.hash(newPassword, saltRounds);
+    const newVersion = (admin.token_version || 1) + 1;
 
-    // Update database
+    // console.log(`[change-password] Updating to version ${newVersion}`);
+
     const { error: updateError } = await supabaseAdmin
       .from('admin_users')
-      .update({ password_hash: newHashedPassword })
+      .update({
+        password_hash: newHashedPassword,
+        token_version: newVersion
+      })
       .eq('id', userId);
 
     if (updateError) {
@@ -1499,12 +1709,56 @@ router.put('/admin/change-password', async (req, res) => {
       return res.status(500).json({ error: 'Failed to update password' });
     }
 
-    res.json({ message: 'Password updated successfully' });
+    const newToken = jwt.sign(
+      {
+        id: userId,
+        role: 'admin',
+        token_version: newVersion
+      },
+      process.env.JWT_SECRET,
+      { expiresIn: '7d' }
+    );
+
+    // console.log(`[change-password] New token issued`);
+
+    res.json({
+      message: 'Password updated successfully',
+      token: newToken
+    });
   } catch (err) {
-    console.error(err);
+    console.error('Error in change-password:', err);
     res.status(500).json({ error: 'Internal server error' });
   }
 });
+// // ------------------- GET CURRENT ADMIN (UNCOMMENTED, ADD phone if needed) -------------------
+// router.get('/me', async (req, res) => {
+//   if (!req.user) {
+//     return res.status(401).json({ error: 'Unauthorized' });
+//   }
+//   if (req.user.role !== 'admin') {
+//     return res.status(403).json({ error: 'Access denied' });
+//   }
+
+//   try {
+//     const { data: admin, error } = await supabaseAdmin
+//       .from('admin_users')
+//       .select('id, login_id, name, role, phone') // Include phone if needed
+//       .eq('id', req.user.id)
+//       .single();
+
+//     if (error || !admin) {
+//       return res.status(404).json({ error: 'Admin not found' });
+//     }
+
+//     res.json({ user: admin });
+//   } catch (err) {
+//     console.error(err);
+//     res.status(500).json({ error: err.message });
+//   }
+// });
+
+
+
 
 module.exports = router;
 
