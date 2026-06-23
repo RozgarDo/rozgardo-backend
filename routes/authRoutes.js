@@ -279,6 +279,61 @@ router.put('/profile/:id', async (req, res) => {
 
 
 
+// router.post('/employee-login', async (req, res) => {
+//   let { phone, password } = req.body;
+//   if (!phone || !password) return res.status(400).json({ error: 'Phone and password required' });
+//   phone = normalizePhone(phone);
+//   try {
+//     const { data: employee, error } = await supabaseAdmin
+//       .from('employees_users')
+//       .select('*')
+//       .eq('phone_number', phone)
+//       .single();
+//     if (error || !employee) return res.status(404).json({ error: 'Employee not found' });
+
+//     // **** ADD THIS STATUS CHECK ****
+//     if (employee.account_status === 'deactivated') {
+//       return res.status(403).json({ code: 'account_deactivated', error: 'Account is deactivated. Please reactivate.' });
+//     }
+
+//     if (employee.account_status === 'suspended') {
+//   return res.status(403).json({ code: 'account_suspended', error: 'Account suspended. Contact support.' });
+// }
+
+//     const isValid = await bcrypt.compare(password, employee.password_hash);
+//     if (!isValid) return res.status(401).json({ error: 'Invalid password' });
+//     const safe = stripPassword(employee);
+//     const user = {
+//       ...safe,
+//       name: safe.full_name,
+//       phone: safe.phone_number,
+//       role: 'employee',
+//       id: safe.id,
+//       first_name: safe.full_name?.split(' ')[0] || '',
+//       last_name: safe.full_name?.split(' ').slice(1).join(' ') || '',
+//       email: safe.email,
+//       bio: safe.bio,
+//       photo_url: safe.photo_url,
+//       location: safe.location,
+//       skills: safe.skills || [],
+//       experience: safe.experience || [],
+//       job_type: safe.job_type || 'Full-time',
+//       preferred_location: safe.preferred_location,
+//       expected_salary: safe.expected_salary,
+//       highest_qualification: safe.highest_qualification,
+//       job_types: safe.job_types || [],
+//       preferred_languages: safe.preferred_languages || [],
+//       phoneVerified: safe.phone_verified || false,
+//     };
+//     delete user.full_name;
+//     delete user.phone_number;
+//     res.json({ message: 'Login successful', user });
+//   } catch (err) {
+//     console.error(err);
+//     res.status(500).json({ error: 'Internal server error' });
+//   }
+// });
+
 router.post('/employee-login', async (req, res) => {
   let { phone, password } = req.body;
   if (!phone || !password) return res.status(400).json({ error: 'Phone and password required' });
@@ -291,17 +346,16 @@ router.post('/employee-login', async (req, res) => {
       .single();
     if (error || !employee) return res.status(404).json({ error: 'Employee not found' });
 
-    // **** ADD THIS STATUS CHECK ****
     if (employee.account_status === 'deactivated') {
       return res.status(403).json({ code: 'account_deactivated', error: 'Account is deactivated. Please reactivate.' });
     }
-
     if (employee.account_status === 'suspended') {
-  return res.status(403).json({ code: 'account_suspended', error: 'Account suspended. Contact support.' });
-}
+      return res.status(403).json({ code: 'account_suspended', error: 'Account suspended. Contact support.' });
+    }
 
     const isValid = await bcrypt.compare(password, employee.password_hash);
     if (!isValid) return res.status(401).json({ error: 'Invalid password' });
+
     const safe = stripPassword(employee);
     const user = {
       ...safe,
@@ -327,7 +381,18 @@ router.post('/employee-login', async (req, res) => {
     };
     delete user.full_name;
     delete user.phone_number;
-    res.json({ message: 'Login successful', user });
+
+    // 🔐 Generate JWT token (no token_version for employees)
+    const token = jwt.sign(
+      {
+        id: user.id,
+        role: 'employee',
+      },
+      process.env.JWT_SECRET,
+      { expiresIn: '7d' }
+    );
+
+    res.json({ message: 'Login successful', user, token });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Internal server error' });
@@ -420,6 +485,56 @@ router.post('/employee/verify-otp', async (req, res) => {
 });
 
 
+// router.post('/employer-login', async (req, res) => {
+//   let { phone, password } = req.body;
+//   if (!phone || !password) return res.status(400).json({ error: 'Phone and password required' });
+//   phone = normalizePhone(phone);
+//   try {
+//     const { data: employer, error } = await supabaseAdmin
+//       .from('employers_users')
+//       .select('*')
+//       .eq('contact_number', phone)
+//       .single();
+//     if (error || !employer) return res.status(404).json({ error: 'Employer not found' });
+
+//     // **** ADD THIS STATUS CHECK ****
+//     if (employer.account_status === 'deactivated') {
+//       return res.status(403).json({ code: 'account_deactivated', error: 'Account is deactivated. Please reactivate.' });
+//     }
+
+//     if (employer.account_status === 'suspended') {
+//   return res.status(403).json({ code: 'account_suspended', error: 'Account suspended. Contact support.' });
+// }
+
+//     const isValid = await bcrypt.compare(password, employer.password_hash);
+//     if (!isValid) return res.status(401).json({ error: 'Invalid password' });
+//     const safe = stripPassword(employer);
+//     const user = {
+//       id: safe.id,
+//       name: safe.company_name,
+//       phone: safe.contact_number,
+//       role: 'employer',
+//       email: safe.official_email,
+//       company_name: safe.company_name,
+//       company_description: safe.company_description,
+//       photo_url: safe.photo_url,
+//       location: safe.office_location,
+//       hr_first_name: safe.hr_first_name,
+//       hr_last_name: safe.hr_last_name,
+//       hr_linkedin: safe.hr_linkedin,
+//       website: safe.website,
+//       industry: safe.industry,
+//       employee_count: safe.employee_count,
+//       phoneVerified: safe.phone_verified || false,
+//     };
+//     res.json({ message: 'Login successful', user });
+//   } catch (err) {
+//     console.error(err);
+//     res.status(500).json({ error: 'Internal server error' });
+//   }
+// });
+
+
 router.post('/employer-login', async (req, res) => {
   let { phone, password } = req.body;
   if (!phone || !password) return res.status(400).json({ error: 'Phone and password required' });
@@ -432,17 +547,16 @@ router.post('/employer-login', async (req, res) => {
       .single();
     if (error || !employer) return res.status(404).json({ error: 'Employer not found' });
 
-    // **** ADD THIS STATUS CHECK ****
     if (employer.account_status === 'deactivated') {
       return res.status(403).json({ code: 'account_deactivated', error: 'Account is deactivated. Please reactivate.' });
     }
-
     if (employer.account_status === 'suspended') {
-  return res.status(403).json({ code: 'account_suspended', error: 'Account suspended. Contact support.' });
-}
+      return res.status(403).json({ code: 'account_suspended', error: 'Account suspended. Contact support.' });
+    }
 
     const isValid = await bcrypt.compare(password, employer.password_hash);
     if (!isValid) return res.status(401).json({ error: 'Invalid password' });
+
     const safe = stripPassword(employer);
     const user = {
       id: safe.id,
@@ -462,13 +576,23 @@ router.post('/employer-login', async (req, res) => {
       employee_count: safe.employee_count,
       phoneVerified: safe.phone_verified || false,
     };
-    res.json({ message: 'Login successful', user });
+
+    // 🔐 Generate JWT token (no token_version for employers)
+    const token = jwt.sign(
+      {
+        id: user.id,
+        role: 'employer',
+      },
+      process.env.JWT_SECRET,
+      { expiresIn: '7d' }
+    );
+
+    res.json({ message: 'Login successful', user, token });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Internal server error' });
   }
 });
-
 
 
 router.post('/employer/send-otp', async (req, res) => {
@@ -1519,36 +1643,132 @@ router.post('/admin/login', async (req, res) => {
 // });
 
 
-//------------------- GET CURRENT ADMIN (with token validation) -------------------
+// //------------------- GET CURRENT ADMIN (with token validation) -------------------
+// router.get('/me', async (req, res) => {
+//   // The middleware attaches req.user if token is valid
+//   if (!req.user) {
+//     return res.status(401).json({ error: 'Unauthorized' });
+//   }
+
+//   if (req.user.role !== 'admin') {
+//     return res.status(403).json({ error: 'Access denied' });
+//   }
+
+//   try {
+//     const { data: admin, error } = await supabaseAdmin
+//       .from('admin_users')
+//       .select('id, login_id, name, role')
+//       .eq('id', req.user.id)
+//       .single();
+
+//     if (error || !admin) {
+//       return res.status(404).json({ error: 'Admin not found' });
+//     }
+
+//     res.json({ user: admin });
+//   } catch (err) {
+//     console.error(err);
+//     res.status(500).json({ error: err.message });
+//   }
+// });
+
+// ------------------- GET CURRENT USER (for all roles) -------------------
 router.get('/me', async (req, res) => {
-  // The middleware attaches req.user if token is valid
+  //console.log('[me] req.user:', req.user);
   if (!req.user) {
     return res.status(401).json({ error: 'Unauthorized' });
   }
 
-  if (req.user.role !== 'admin') {
-    return res.status(403).json({ error: 'Access denied' });
-  }
-
   try {
-    const { data: admin, error } = await supabaseAdmin
-      .from('admin_users')
-      .select('id, login_id, name, role')
-      .eq('id', req.user.id)
-      .single();
+    let userData = null;
 
-    if (error || !admin) {
-      return res.status(404).json({ error: 'Admin not found' });
+    if (req.user.role === 'admin') {
+      // Admin – keep aliases (or use manual mapping)
+      const { data, error } = await supabaseAdmin
+        .from('admin_users')
+        .select('id, login_id, name, role, phone, token_version')
+        .eq('id', req.user.id)
+        .single();
+      if (error) throw error;
+      userData = { ...data, role: 'admin' };
+    } 
+    else if (req.user.role === 'employee') {
+      // No aliases – select raw column names
+      const { data, error } = await supabaseAdmin
+        .from('employees_users')
+        .select('id, full_name, phone_number, email, photo_url, location, skills, experience, job_type, preferred_location, expected_salary, highest_qualification, job_types, preferred_languages, phone_verified')
+        .eq('id', req.user.id)
+        .single();
+      if (error) {
+        console.error('[me] Employee fetch error:', error);
+        throw error;
+      }
+      // Map to the shape the frontend expects
+      userData = {
+        id: data.id,
+        name: data.full_name,
+        phone: data.phone_number,
+        email: data.email,
+        photo_url: data.photo_url,
+        location: data.location,
+        skills: data.skills || [],
+        experience: data.experience || [],
+        job_type: data.job_type || 'Full-time',
+        preferred_location: data.preferred_location,
+        expected_salary: data.expected_salary,
+        highest_qualification: data.highest_qualification,
+        job_types: data.job_types || [],
+        preferred_languages: data.preferred_languages || [],
+        phone_verified: data.phone_verified || false,
+        role: 'employee'
+      };
+      //console.log('[me] Employee data mapped:', userData);
+    } 
+    else if (req.user.role === 'employer') {
+      // No aliases – select raw column names
+      const { data, error } = await supabaseAdmin
+        .from('employers_users')
+        .select('id, company_name, contact_number, official_email, photo_url, office_location, hr_first_name, hr_last_name, hr_linkedin, website, industry, employee_count, company_description, phone_verified')
+        .eq('id', req.user.id)
+        .single();
+      if (error) {
+        console.error('[me] Employer fetch error:', error);
+        throw error;
+      }
+      // Map to the shape the frontend expects
+      userData = {
+        id: data.id,
+        name: data.company_name,
+        phone: data.contact_number,
+        email: data.official_email,
+        photo_url: data.photo_url,
+        location: data.office_location,
+        hr_first_name: data.hr_first_name,
+        hr_last_name: data.hr_last_name,
+        hr_linkedin: data.hr_linkedin,
+        website: data.website,
+        industry: data.industry,
+        employee_count: data.employee_count,
+        company_description: data.company_description,
+        phone_verified: data.phone_verified || false,
+        role: 'employer'
+      };
+      //console.log('[me] Employer data mapped:', userData);
+    } 
+    else {
+      return res.status(403).json({ error: 'Unknown role' });
     }
 
-    res.json({ user: admin });
+    if (!userData) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    res.json({ user: userData });
   } catch (err) {
-    console.error(err);
+    console.error('[me] Error:', err);
     res.status(500).json({ error: err.message });
   }
 });
-
-
 
 // ------------------- ADMIN: GET ALL APPLICATIONS (manual join, includes employer name) -------------------
 router.get('/admin/applications', async (req, res) => {
@@ -1730,33 +1950,6 @@ router.put('/admin/change-password', async (req, res) => {
     res.status(500).json({ error: 'Internal server error' });
   }
 });
-// // ------------------- GET CURRENT ADMIN (UNCOMMENTED, ADD phone if needed) -------------------
-// router.get('/me', async (req, res) => {
-//   if (!req.user) {
-//     return res.status(401).json({ error: 'Unauthorized' });
-//   }
-//   if (req.user.role !== 'admin') {
-//     return res.status(403).json({ error: 'Access denied' });
-//   }
-
-//   try {
-//     const { data: admin, error } = await supabaseAdmin
-//       .from('admin_users')
-//       .select('id, login_id, name, role, phone') // Include phone if needed
-//       .eq('id', req.user.id)
-//       .single();
-
-//     if (error || !admin) {
-//       return res.status(404).json({ error: 'Admin not found' });
-//     }
-
-//     res.json({ user: admin });
-//   } catch (err) {
-//     console.error(err);
-//     res.status(500).json({ error: err.message });
-//   }
-// });
-
 
 
 
